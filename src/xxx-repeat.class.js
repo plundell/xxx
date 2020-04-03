@@ -4,7 +4,7 @@
 /*
 * @component Repeater
 * @part-of xxx-framework
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @description Repeaters use standalone/underlying smarties.Array to repeat templates within a target element 
 *              in the DOM. 

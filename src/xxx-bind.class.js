@@ -5,7 +5,7 @@
 * @component Binder
 * @part-of xxx-framework
 * @description This component provides two-way databinding to the DOM. 
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @note: This component is required by ./xxx.proto.js, you should not need to access it directly.
 * @depends libbetter

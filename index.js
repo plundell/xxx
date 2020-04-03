@@ -1,7 +1,7 @@
 ;'use strict';
 /*
 * @part-of xxx-framework
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @depends libbetter
 * @depends smarties

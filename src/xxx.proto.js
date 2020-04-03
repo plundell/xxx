@@ -4,7 +4,7 @@
 /*
 * @component Prototype
 * @part-of xxx-framework
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @description This is the main file of the frontend xxx-framework. It requires the other components and produces an
 *              object containing their constructors: Binder, Navigator, Repeater.

@@ -2,7 +2,7 @@
   "name": "xxx-framework"
   ,"version": "1.0.0"
   ,"description": "A lightweight frontend framework that provides two-way binding, repeating templates and ui navigation"
-  ,"author": "x7dude"
+  ,"author": "plundell"
   ,"license": "Apache-2.0"
   ,"main":"src/xxx-proto.js"
   ,"scripts": {

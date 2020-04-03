@@ -2,7 +2,7 @@
 /*
 * @component Prototype
 * @part-of xxx-framework
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @description This is the main file of the frontend xxx-framework. It requires the other components and produces an
 *              object containing their constructors: Binder, Navigator, Repeater.
@@ -16,7 +16,7 @@ t.exports=function(t){function e(t){throw new Error("xxx-framework was initializ
 * @component Binder
 * @part-of xxx-framework
 * @description This component provides two-way databinding to the DOM. 
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @note: This component is required by ./xxx.proto.js, you should not need to access it directly.
 * @depends libbetter
@@ -38,7 +38,7 @@ t.exports=function(t){function e(t){throw new Error("xxx-framework was initializ
 * @description Navigators show and hide elements using various means like url hash. It uses "logic states", ie. HIGH 
 *              and LOW instead of 'show' and 'hide'. If the 'mode' set on an element is 'inverse', then HIGH=hide 
 *              whereas normally HIGH=show. 
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @note: This component is required by ./xxx.proto.js, you should not need to access it directly.
 * @depends libbetter
@@ -52,7 +52,7 @@ t.exports=function(t){function e(t){throw new Error("xxx-framework was initializ
 /*
 * @component Repeater
 * @part-of xxx-framework
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @description Repeaters use standalone/underlying smarties.Array to repeat templates within a target element 
 *              in the DOM. 

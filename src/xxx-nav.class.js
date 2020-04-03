@@ -7,7 +7,7 @@
 * @description Navigators show and hide elements using various means like url hash. It uses "logic states", ie. HIGH 
 *              and LOW instead of 'show' and 'hide'. If the 'mode' set on an element is 'inverse', then HIGH=hide 
 *              whereas normally HIGH=show. 
-* @author x7dude
+* @author plundell
 * @license Apache-2.0
 * @note: This component is required by ./xxx.proto.js, you should not need to access it directly.
 * @depends libbetter
