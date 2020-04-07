@@ -29,6 +29,7 @@ Object.defineProperty(window,'xxx',{enumerable:true, configurable:true
 				+"have not been set on the global scope");
 		}
 	}
+	
 	//This setter allows^ the whole thing to easily be undone/overwritten
 	,set:(val)=>{
 		Object.defineProperty(window,'xxx',{value:val,enumerable:true,writable:true,configurable:true}); 
