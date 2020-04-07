@@ -10,8 +10,8 @@
 *              object containing their constructors: Binder, Navigator, Repeater.
 * @depends libbetter
 * @depends smarties
-*
-* There are two options 
+* @exports function   This framework exports an "exporter function" which should be called with the 
+*                     dependencies to get the "real exported contents". 
 */
 
 
