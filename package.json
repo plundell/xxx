@@ -1,6 +1,6 @@
 {
   "name": "xxx-framework"
-  ,"version": "1.0.0"
+  ,"version": "1.0.1"
   ,"description": "A lightweight frontend framework that provides two-way binding, repeating templates and ui navigation"
   ,"author": "plundell"
   ,"license": "Apache-2.0"
@@ -8,6 +8,11 @@
   ,"scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
     ,"build":"npx webpack index.js -o dist/xxx.js"
+  }
+  ,"homepage": "https://github.com/plundell/smarties"
+  ,"repository": {
+    "type": "git"
+    ,"url": "git+https://github.com/plundell/smarties.git"
   }
   ,"dependencies": {
     "libbetter": "^1.0.0"
