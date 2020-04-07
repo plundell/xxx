@@ -25,11 +25,11 @@ Object.defineProperty(window,'xxx',{enumerable:true, configurable:true
 		if(window.Smarties && window.BetterLog && window.BetterEvents && window.BetterUtil){ 
 			return window.xxx=exporter(window);
 		}else{
-			throw new Error("The xxx-framework could not be initialized because it's dependencies "
+			throw new Error("E_DEPENDENCY. The xxx-framework could not be initialized because it's dependencies "
 				+"have not been set on the global scope");
 		}
 	}
-	
+
 	//This setter allows^ the whole thing to easily be undone/overwritten
 	,set:(val)=>{
 		Object.defineProperty(window,'xxx',{value:val,enumerable:true,writable:true,configurable:true}); 
