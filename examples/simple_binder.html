@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Binder Example 1</title>
+	<script type="text/javascript" src="lib/libbetter.js"></script>
+	<script type="text/javascript" src="lib/smarties.js"></script>
+	<script type="text/javascript" src="lib/xxx.js"></script>
+</head>
+<body>
+	<div>
+		Hi my name is <span class="foo" xxx-bind-text="myName"></span> and I like <span class="foo" xxx-bind-text="hobby"></span><span class="foo xxx-hide" xxx-bind='{"key":"age","fn":"show","test":">40"}'>, and I'm old!</span>!
+	</div>
+	<div>
+		<label>
+			Hobby:
+			<input class="foo" type="text" xxx-bind-value="hobby">
+		</label>
+
+	</div>
+	<div>
+		<label>
+			Age:
+			<input class="foo" type="range" xxx-bind-value="age" value="20">
+		</label>
+		<span class="foo" xxx-bind='{"key":"age","fn":"text"}'></span>
+	</div>
+	<footer>
+		<script type="text/javascript">
+			// debugger;
+			var Foo=new window.xxx.Binder("foo",{autoPrintLvl:1}).scrape().setup();
+			console.warn(Foo.copy());
+			Foo.on('_age',console.warn)
+//STOPSTOP 2020-04-08: Somehow the binder has the keyFor some reason vv age=20 doesn't overwrite ^ where age is set to 50 because range get's ''
+
+			Foo.on('event',console.log);
+			Foo.scrape(); //scrape to fetch age=20 from input ^^
+			// Foo.setup();
+			Foo.set('myName','Bob');
+			console.log("Initial:",Foo);
+			xxx.Binder._setupTwoWayBinding();
+			setTimeout(()=>{
+				Foo.set('hobby','golf');
+				console.log('Later:',Foo)
+			},500)
+		</script>
+	</footer>
+</body>
+</html>

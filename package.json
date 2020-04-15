@@ -1,25 +1,28 @@
 {
-  "name": "xxx-framework"
-  ,"version": "1.0.2"
-  ,"description": "A lightweight frontend framework that provides two-way binding, repeating templates and ui navigation"
-  ,"author": "plundell"
-  ,"license": "Apache-2.0"
-  ,"main":"src/xxx-proto.js"
-  ,"scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-    ,"build":"npx webpack index.js -o dist/xxx.js"
-  }
-  ,"homepage": "https://github.com/plundell/smarties"
-  ,"repository": {
-    "type": "git"
-    ,"url": "git+https://github.com/plundell/smarties.git"
-  }
-  ,"dependencies": {
-    "libbetter": "^1.0.0"
-    ,"smarties": "^1.0.0"
-  }
-  ,"devDependencies": {
+  "name": "xxx-framework",
+  "version": "1.0.2",
+  "description": "A lightweight frontend framework that provides two-way binding, repeating templates and ui navigation",
+  "author": "plundell",
+  "license": "Apache-2.0",
+  "main": "src/xxx-proto.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npx webpack --mode=development build.js -o dist/xxx.js && npx webpack --mode=production build.js -o dist/xxx.min.js",
+    "dev:old": "webpack-dev-server --content-base ./examples --mode=development build.js -o dist/xxx.js",
+    "dev":"webpack-dev-server --config dev.config.js"
+  },
+  "homepage": "https://github.com/plundell/xxx",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plundell/xxx.git"
+  },
+  "dependencies": {
+    "libbetter": "^1.0.0",
+    "smarties": "^1.0.0"
+  },
+  "devDependencies": {
     "webpack": "^4.42.1",
-    "webpack-cli": "^3.3.11"
+    "webpack-cli": "^3.3.11",
+    "webpack-dev-server": "^3.10.3"
   }
 }
