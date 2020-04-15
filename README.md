@@ -23,6 +23,7 @@ a) Include the bundled version directly in the browser as you would any script, 
   }; 
 </script>
 <script src="path/to/libbetter/dist/libbetter.js" type="text/javascript"></script>
+<script src="path/to/smarties/smarties.js" type="text/javascript"></script>
 <script type="text/javascript">
   console.log(window.xxx); // {Binder: ƒ, Repeater: ƒ, Navigator: ƒ}
 </script>
@@ -31,7 +32,8 @@ a) Include the bundled version directly in the browser as you would any script, 
 b) Require the package into another script, initialize it with it's dependencies, then bundle that.
  ```javascript
  var libbetter=require('libbetter');
- var xxx=require('xxx-framework')(libbetter);
+ var Smarties=require('libbetter');
+ var xxx=require('xxx-framework')(Object.assign({},libbetter,Smarties));
  console.log(xxx); // {Binder: ƒ, Repeater: ƒ, Navigator: ƒ}
  ```
  ```html
