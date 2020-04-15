@@ -8,7 +8,11 @@
 </head>
 <body>
 	<div>
-		Hi my name is <span class="foo" xxx-bind-text="myName"></span> and I like <span class="foo" xxx-bind-text="hobby"></span><span class="foo xxx-hide" xxx-bind='{"key":"age","fn":"show","test":">40"}'>, and I'm old!</span>!
+		Hi my name is 
+		<span class="foo" xxx-bind-text="myName"></span> 
+		<span class="foo" xxx-bind-show="hobby"> and I like </span>
+		<span class="foo" xxx-bind-text="hobby"></span>
+		<span class="foo xxx-hide" xxx-bind='{"key":"age","fn":"show","test":">40"}'>, and I'm old!</span>!
 	</div>
 	<div>
 		<label>
@@ -20,28 +24,46 @@
 	<div>
 		<label>
 			Age:
-			<input class="foo" type="range" xxx-bind-value="age" value="20">
+			<input class="foo" type="range" xxx-bind-value="age" value="60">
 		</label>
 		<span class="foo" xxx-bind='{"key":"age","fn":"text"}'></span>
 	</div>
 	<footer>
 		<script type="text/javascript">
-			// debugger;
-			var Foo=new window.xxx.Binder("foo",{autoPrintLvl:1}).scrape().setup();
-			console.warn(Foo.copy());
-			Foo.on('_age',console.warn)
-//STOPSTOP 2020-04-08: Somehow the binder has the keyFor some reason vv age=20 doesn't overwrite ^ where age is set to 50 because range get's ''
+			//First we create the binder with the "target class" 'foo' (which is the same
+			//class we've used to identify elements in the html above)
+			var Foo=new window.xxx.Binder("foo",{autoPrintLvl:1})
+				.scrape() //we scrape any values already in the DOM, in our case only {age:60}
+				.setup() //we setup the binder, which updates all bound elements, in our case showing "I'm old"
+			;
 
-			Foo.on('event',console.log);
-			Foo.scrape(); //scrape to fetch age=20 from input ^^
-			// Foo.setup();
+			//Now we set a new value on the binder, which will be shown in the bound <span> tag
 			Foo.set('myName','Bob');
-			console.log("Initial:",Foo);
+
+			//We activate two-way binding, allowing us to change the value of Foo via the <input> tags
 			xxx.Binder._setupTwoWayBinding();
+
+			//Then simulate input just for fun...
 			setTimeout(()=>{
-				Foo.set('hobby','golf');
-				console.log('Later:',Foo)
-			},500)
+				let what='golf',i=0;
+				let interval=setInterval(()=>{
+					if(++i>what.length){
+						clearTimeout(interval);
+					}else{
+						Foo.set('hobby',what.substr(0,i));
+					}
+				},200)
+			},1000)
+			setTimeout(()=>{
+				let interval=setInterval(()=>{
+					let age=Foo.get('age')
+					if(age<20){
+						clearTimeout(interval);
+					}else{
+						Foo.set('age',--age);
+					}
+				},20)
+			},3000)
 		</script>
 	</footer>
 </body>
