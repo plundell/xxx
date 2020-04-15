@@ -22,7 +22,7 @@ module.exports=function exportXXX(dep){
 	if(!dep.BetterUtil) missingDependency('BetterUtil');
 	if(!dep.BetterLog) missingDependency('BetterLog');
 	if(!dep.BetterEvents) missingDependency('BetterEvents');
-	if(!dep.smarties) missingDependency('smarties');
+	if(!dep.Smarties) missingDependency('Smarties');
 
 
 	const bu = dep.BetterUtil
@@ -47,13 +47,13 @@ module.exports=function exportXXX(dep){
 			if(self){
 				if(self._isBetterLog)
 					return self;
-				else if(self.log._isBetterLog)
+				else if(self.log && self.log._isBetterLog)
 					return self.log;
-				else if(self._log._isBetterLog)
+				else if(self._log && self._log._isBetterLog)
 					return self._log
 			}
 		})
-		return log||xxxLog||dep.BetterLog._syslog;
+		return xxxLog;
 	}
 
 
@@ -905,7 +905,7 @@ module.exports=function exportXXX(dep){
 					funcs.forEach(f=>f.call(this,x)) 
 						//^end the chain early by throwing. throw the string 'abort' to end without logging error
 				}else{
-					this._log.trace(`${msg}:`,{func:funcs[0].name,arg:x});
+					this._log.trace(`${msg}:`,x);
 					funcs[0].call(this,x);
 				}
 

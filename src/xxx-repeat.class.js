@@ -252,7 +252,7 @@ module.exports=function exportRepeater(dep,proto){
 			case 'array':
 				//Create new smarty...
 				// this._log.note("Setting up new smarties.Array with options:",this._private.options);
-				sArr=new dep.smarties.Array(this._private.options);
+				sArr=new dep.Smarties.Array(this._private.options);
 				
 				if(data){ //...and add all data to it
 					sArr.concat(data);

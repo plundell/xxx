@@ -22,7 +22,7 @@
 
 module.exports=function exportNavigator(dep,proto){;
 
-	const bu=dep.util;
+	const bu=dep.BetterUtil;
 
 	/*
 	* @param string targetClass

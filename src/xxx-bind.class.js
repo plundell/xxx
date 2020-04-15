@@ -55,7 +55,7 @@ module.exports=function exportBinder(dep,proto){
 		options.name=targetClass;
 
 		
-		//We allow existing <SmartObject>s to be upgraded to Binders...
+		//Are we upgrading an existing <SmartObject>... (see upgradeSmarty())
 		if(this===data){
 			this._log.info("Turning this smarty into a Binder");
 			this.__proto__=Binder.prototype;
@@ -68,37 +68,40 @@ module.exports=function exportBinder(dep,proto){
 			//reflect that this is now a binder
 			this._log.changeName(options.name);
 
+			//Any existing data will be propogated to the DOM after some more setup below.
+
+
+		//...or are we creating a new <Binder> from scratch?
 		}else{
 			//If $data was passed in seperately, set it as defaultValues
 			if(data && typeof data=='object'){
 				
 				//If data was a smarty we listen to events on it and extend to this Binder. That
 				//way we get a one-way data connection so the same smarty can be used to seed 
-				//multiple Binders, and then additional values can be set on each binder
+				//multiple Binders, and then additional values can be set on each binder without 
+				//affecting the shared smarty
 				if(data.isSmart=='SmartObject'){
 					this.replicateFrom(data);
 					data=data.stupify();
 				}
 
+				//Any seperate data passed in is combined with options.defaultValues because 
+				//they're both together the default values of this Binder
 				options.defaultValues=Object.assign({},options.defaultValues,data);
 			}
 
-			//Sets up this._log, this._private and BetterEvents inheritence. 
-			dep.smarties.Object.call(this,Object.assign({},Binder._defaultOptions,options)); 
+			//Extend the <SmartObject> class. If any data/defaultValues where passed in then they'll 
+			//emit events as the smarty calls .reset() as part of it's setup. The problem is we're 
+			//not listening for that yet, so we we manually propogate below.
+			dep.Smarties.Object.call(this,Object.assign({},Binder._defaultOptions,options)); 
+				//^Sets up this._log, this._private and BetterEvents inheritence. 
 		}
-
-		
-
-			
+		//NOTE: in both cases above (upgrade/new) we have yet to propogate data to the DOM
 
 		//Define the classes that identify inputs and outputs
 		this._private.targetClass=targetClass  
 		
-	//2020-03-30: Not used anymore
-		// this._private.inputClass=targetClass+"-input" 
-
-		
-
+	
 		//Create this._private.actions and register the basic actions. NOTE: this.registerActionHandler is
 		//added to our prototype below via proto.prototype
 		proto.setupActions.call(this);
@@ -108,30 +111,16 @@ module.exports=function exportBinder(dep,proto){
 		this.on('event',dataEventCallback.bind(this));
 
 
-		//If data was passed in and we have nodes in the DOM: run setup right away...
-		let l=this.getOutputs().length;
-		if(data){
-			if(l){
-				this.setup();
-			}else{
-				this._log.trace("No nodes found in DOM, ie. not propogating default data:",this._private.options.defaultValues);
-			}
-		}else if(l){
-			if(this._private.options.defaultValues){
-				this._log.note("Nodes found in DOM, but defaultValues was passed as option instead of as arg#3"
-					+", so not propogating it (or scaning for inputs)...");
-			}else{
-				this._log.trace("Nodes found in DOM but arg#3==false, so not scaning for inputs...");
-			}
+		//If there are already outputs and we have initial data, propogate it now! 
+		if(this.getOutputs().length && this.length){
+			this.setup();
 		}
+		//ProTip: this^ will overwrite any data already in the DOM that we may wish to scrape (in which 
+		//case you should create an empty Binder, run .scrape(), then run .fillOut())
 
-		//...else setup() can be run later; Binder is ready to use either way, setup() just scrapes for
-		//data and starts listening to any inputs
-			
-		
 
 	} //end of constructor
-	Binder.prototype=Object.create(dep.smarties.Object.prototype);
+	Binder.prototype=Object.create(dep.Smarties.Object.prototype);
 	Object.assign(Binder.prototype,proto.prototype)//add common methods
 	Object.defineProperty(Binder.prototype, 'constructor', {value: Binder});
 
@@ -145,7 +134,6 @@ module.exports=function exportBinder(dep,proto){
 			children:'complex' //used by smarties.Object only. Can be changed to 'primitive'. Changing to 'smart' will
 							   //not affect how this binder works, but won't break anything
 
-			,scrapeForData:false //If true, setup() will scrape for data which gets applied AFTER constructor(,,$data)
 	
 //2020-03-30: not using this for now... in near future add options that throttle events coming out of certain inputs
 			,ignoreTimeout:3000 //When typing in inputs, ignore updates on that input for this many ms after
@@ -156,7 +144,7 @@ module.exports=function exportBinder(dep,proto){
 		
 		//static options used by entire class. These CAN be changed at runtime. Do so BEFORE interacting with this clas
 		//in any way
-		,_classOptions:{value:{ 
+		,_staticOptions:{value:{ 
 			inputDebounce:100 //Don't update the value of inputs for this many ms after they've emitted 'input'. This prevents 
 							   //loops that especially affect text inputs where you risk loosing the last typed characters if
 							   //you're a fast enough typer on a slow enough system
@@ -171,7 +159,7 @@ module.exports=function exportBinder(dep,proto){
 	* @param <SmartObject> smarty
 	* @return $smarty
 	*/
-	Binder.create=function create(targetClass,options,smarty){
+	Binder.upgradeSmarty=function upgradeSmarty(targetClass,options,smarty){
 		if(!smarty || smarty.isSmart!='SmartObject')
 			bu._log.makeTypeError("<SmartObject>",smarty).throw();
 
@@ -191,18 +179,32 @@ module.exports=function exportBinder(dep,proto){
 	* NOTE: If this method is NOT called Binders will only propogate future changes to their smarties
 	*/
 	Binder._init=bu.once(function initBinders(){
+		//Any binders that were created before there where outputs, propogate them now...
 		Binder._instances.forEach(binder=>{
-			if(binder.getOutputs().length){
+			if(!binder._private.isSetup){
 				binder.setup();
 			}
 		})
+
 		Binder._setupTwoWayBinding();
+		
 		Binder._automaticallyBind();
 	})
 	
 
+	//Since ^ can optionally be called but doesn't have to be, we check a few seconds after this file has
+	//loaded and warn if it hasn't been, just so the dev knows he may be forgetting something
+	setTimeout(function BinderInitCheck(){
+		if(!Binder._setupTwoWayBinding._once){
+			bu._log.note("You have not run Binder._setupTwoWayBinding() which means binding is only one way, ie. any changes"
+				+" made by the user to DOM inputs won't affect the Binder (and will be overwritten if the Binder later changes");
+		}
 
-
+		if(!Binder._automaticallyBind._once){
+			bu._log.note("You have not run Binder._automaticallyBind() which means current data won't be automatically"
+				+" propogated to new nodes, instead you have to call .triggerUpdate(node) manually, or wait for the data to change")
+		}
+	},3000)
 
 
 
@@ -220,7 +222,8 @@ module.exports=function exportBinder(dep,proto){
 	* @no-throw
 	* @call(<Binder>|any) 	For logging purposes only
 	*/
-	Binder._parseElem=function parseElem(elem){
+	Binder._parseElem=parseElem;
+	function parseElem(elem){
 		let binder=getBinder.call(this,elem);
 		if(binder){
 			getBindInstructions.call(this,elem); //may set empty, ie. you need to forgetElem() for this to change
@@ -238,7 +241,8 @@ module.exports=function exportBinder(dep,proto){
 	* @return void
 	* @no-throw
 	*/
-	Binder._forgetElem=function forgetElem(elem){
+	Binder._forgetElem=forgetElem;
+	function forgetElem(elem){
 		//DevNote: If you create another prop in some function, you should add it to this list
 		delete elem[BINDER];
 		delete elem[INSTRUCTIONS];
@@ -256,19 +260,17 @@ module.exports=function exportBinder(dep,proto){
 	* @param <HTMLElement> elem
 	* @return <Binder>|undefined
 	*/
-	Binder._getBinder=function getBinder(elem){
-		if(elem.hasOwnProperty(BINDER)){
-			return elem[BINDER];
-		}else{
+	Binder._getBinder=getBinder;
+	function getBinder(elem){
+		if(!elem.hasOwnProperty(BINDER)){
 			//Look for a binder given an elements classes, saving it if found
-			let binder=ArrayFrom(event.target.classList).find(cls=>Binder._instances.has(cls));
-			if(binder){
-				elem[BINDER]=binder;
+			let cls=Array.from(elem.classList).find(cls=>Binder._instances.has(cls));
+			if(cls){
+				elem[BINDER]=Binder._instances.get(cls);
 			}
-
-			//Now return what may be a <Binder> or what may be undefined
-			return binder;
 		}
+		//Now return what may be a <Binder> or what may be undefined
+		return elem[BINDER];
 	}
 
 	/*
@@ -277,25 +279,26 @@ module.exports=function exportBinder(dep,proto){
 	* NOTE: This function stores a reference to the live parsed instructions on the elem itself for 
 	* 		future lookup speed. Use Binder._forgetElem() to remove this and other similar lookups.
 	*
-	* @param <HTMLElement> node
+	* @param <HTMLElement> elem
 	* @param @opt string key  	If given, a concated array of instructions for that key and '*' is returned
 	*							 instead of the whole instructions object. Possibly an empty array
 	*
-	* @throw <ble TypeError> 	If $node isn't a node, bubbles from getInstructions()
+	* @throw <ble TypeError> 	If $elem isn't an element, bubbles from getInstructions()
 	*
 	* @return object 			An object where keys match keys for the underlying smart and  values 
 	*							 are arrays of instructions. Possibly an empty object if no instructions 
 	*							 are found. Also @see $key
 	*
-	* @call(<Binder>|any) 	 		Used for logging only. Please make sure in other ways that the node isn't bound to
+	* @call(<Binder>|any) 	 		Used for logging only. Please make sure in other ways that the elem isn't bound to
 	*								 the wrong/another binder instance
 	*/
-	Binder._getBindInstructions=function getBindInstructions(node, key){
+	Binder._getBindInstructions=getBindInstructions;
+	function getBindInstructions(elem, key){
 
-		//If no live object exists on the node...
-		if(!node.hasOwnProperty(INSTRUCTIONS)){
+		//If no live object exists on the elem...
+		if(!elem.hasOwnProperty(INSTRUCTIONS)){
 			//...parse instructions anew
-			node[INSTRUCTIONS]=proto.getInstructions.call(this,node,'group'); //throws TypeError, can return empty array
+			elem[INSTRUCTIONS]=proto.getInstructions.call(this,elem,'group'); //throws TypeError, can return empty array
 
 			//Also delete the KEY and V_INST which may need to be re-parsed
 			delete elem[KEY];
@@ -303,9 +306,9 @@ module.exports=function exportBinder(dep,proto){
 		}
 
 		if(typeof key=='string'){
-			return (node[INSTRUCTIONS][key]||[]).concat(node[INSTRUCTIONS]['*']||[]); //this also clones the array so we don't alter the orig
+			return (elem[INSTRUCTIONS][key]||[]).concat(elem[INSTRUCTIONS]['*']||[]); //this also clones the array so we don't alter the orig
 		}else{
-			return node[INSTRUCTIONS];
+			return elem[INSTRUCTIONS];
 		}
 	}
 
@@ -313,47 +316,45 @@ module.exports=function exportBinder(dep,proto){
 
 
 	/*
-	* Find which key, if any, in a node's instructions is bound to the nodes value. This is used to scrape
+	* Find which key, if any, in a elem's instructions is bound to the nodes value. This is used to scrape
 	* both inputs and outputs for data
 	*
-	* @param <HTMLElement> node
+	* @param <HTMLElement> elem
 	*
 	* @throw <ble TypeError>  		Bubbles from getBindInstructions()
 	*
 	* @return string|null 			A key name or null if no key could be found
 	*
-	* @call(<Binder>|any) 	 		Used for logging only. Please make sure in other ways that the node isn't bound to
+	* @call(<Binder>|any) 	 		Used for logging only. Please make sure in other ways that the elem isn't bound to
 	*								 the wrong/another binder instance
 	*/
-	Binder._findKeyBoundToValue=function findKeyBoundToValue(node){
+	Binder._findKeyBoundToValue=findKeyBoundToValue;
+	function findKeyBoundToValue(elem){
 		try{
-			if(node.hasOwnProperty(KEY)){
-				return node[KEY];
-			}else{
-				var key,inst,backup=null,instructions=getBindInstructions.call(this,node);
+			if(!elem.hasOwnProperty(KEY)){
+				var key,inst,backup=null,instructions=getBindInstructions.call(this,elem);
 				loops:
 					for(key in instructions){
 						for(inst of instructions[key]){
 							if(inst.fn=='value'){
-								break loops;
+								break loops; //break loop without unsetting key vv
 							}else if(inst.fn=='text' || inst.fn=='html'){
-								backup=inst; 
+								backup=key; 
 							}
 						}
+						key=undefined;
 					}
 				//------ end of loops
 
 				//Regardless if we found anything, set this value so we don't check again until having called forgetElem()
-				node[V_INST]=inst
-				node[KEY]=(inst ? inst.key : undefined)
-
-				//Now return what may be a key or what may be undefined
-				return backup;
+				elem[V_INST]=inst
+				elem[KEY]=key||backup
 			}
 
+			return elem[KEY];
 
 		}catch(err){
-			(this._log||bu._log).makeError('Failed to identify key bound to value',node,instructions,err).throw();
+			(this._log||bu._log).makeError('Failed to identify key bound to value',elem,instructions,err).throw();
 		}
 	}
 
@@ -405,7 +406,7 @@ module.exports=function exportBinder(dep,proto){
 		  on the <body> and use them to attempt to parse the target. If it finds a binder it sets a prop 
 		  which binderInputEventHandler() will look for, ignoring the event if it's not there
 		*/
-		document.body.addEventListener('focusin',function parseElemOnFocus(event){parseElem(evt.target)});
+		document.body.addEventListener('focusin',function parseElemOnFocus(event){parseElem(event.target)});
 
 		/*
 		  While inputting quickly on a slow system, the 'input' events caught here^ may be slow to make it
@@ -425,7 +426,7 @@ module.exports=function exportBinder(dep,proto){
 		  look for this attribute and NOT run the instruction linked to the value of the input (see 
 		  findKeyBoundToValue() which flags that instruction)
 		*/
-		bu.markInputting(Binder._classOptions.inputDebounce);
+		bu.markInputting(Binder._staticOptions.inputDebounce);
 
 
 	})
@@ -556,11 +557,14 @@ module.exports=function exportBinder(dep,proto){
 
 			//Get the value depending on...
 			let value = (event.target.type == 'checkbox' ? event.target.checked : event.target.value)
-
-
-			//...and update the value on every change. NOTE: since we update every time it 
+		
+			//...and update the value on every change. 
 			//my not be a good idea to bind textboxes where users write a whole novel...
 			self.set(key,value,{target:event.target,src:'input'});
+			//NOTE: if the input changes rapidly/frequently and all intermittent values are NOT of interest
+			//      you can either: a) throttle the events being emitted by the input, and/or b) use the 
+			//      'throttle' or 'debounce' options of the underlying Smarty to afffect the 'change' events
+			//		comming from it and handled by dataEventCallback() here
 
 			//Extra... Necessary?? Emit the input-event on the binder
 			self.emit('input',event);
@@ -595,16 +599,6 @@ module.exports=function exportBinder(dep,proto){
 
 
 
-
-
-
-
-
-
-
-
-
-
 	//Define getter for inputs and outputs for ease
 	Binder.prototype.getOutputs=function(){
 		return Array.from(document.getElementsByClassName(this._private.targetClass))
@@ -614,245 +608,94 @@ module.exports=function exportBinder(dep,proto){
 	};
 
 
-
-
-
-
-
-
 	/*
-	* Setup this binder, ie. look through the DOM for elems to scrape and start listening to inputs 
+	* Prepare the binder to be used. Now calling is only done to setup the initial state and make sure
+	* the initial input event gets parsed, after that it will have happened anyway...
 	*
-	* NOTE: This step is NOT required, the binder is already active and will propogate changes
-	* NOTE2: This has no effect if called before any outputs exist
-	* NOTE3: This method can be called multiple times without deterimental effect (except wasted time)
-	*
-	* @return this
+	* @return <Binder>
 	*/
 	Binder.prototype.setup=function(){
-		let outputs=this.getOutputs();
-		if(!outputs.length){
-			this._log.warn(`No inputs/outputs with class ${this._private.targetClass} found! Did you setup this binder too soon?`);
-
+		if(this._private.isSetup){
+			this._log.warn('Setting up binder again...');
 		}else{
-			this._log.debug("Setting up these nodes:",outputs);
-			outputs.forEach(parseElem.bind(this));
-
-			//If we havn't started listening to inputs yet and this binder has some, then do it! The reason we
-			//don't aways do it is because there is a little overhead involved, and if no Binders have any bound 
-			//inputs then it's just a liiiiitle bit of a trim
-			if(!Binder._setupTwoWayBinding.hasOwnProperty('_once') && this.getInputs().length)
-				Binder._setupTwoWayBinding()
-
-		//2020-03-30: Not necessary anymore
-			//Input nodes shouldn't have the inputClass set yet. Instead we look through the
-			//output nodes and flag/class any input elements we find, and at the same time 
-			//attach listeners.
-			// this.findNewInputs();
-	
-			//If opted, scrape the DOM for data BEFORE assigning any default values so we don't loose them...
-			//NOTE: only nodes with 'value' fn will be scraped (not 'text' or 'html')
-			if(this._private.options.scrapeForData){
-				var data=this.scrape();
-				if(bu.isEmpty(data))
-					this._log.note("Scraped for data but none found")
-				else
-					this._log.info("Scraped and found data in html:",data);
-			}else{
-				this._log.debug("options.scrapeForData==false, ie. not scraping");
-			}
-
-			//Now that we've scraped, if default values where passed in, assign them
-			if(this._private.options.defaultValues){
-				this._log.debug("Propogating default values to page");
-				this.forceUpdate();
-			}
-
-			//And finally apply the scraped data if any was found
-			if(!bu.isEmpty(data)){
-				this._log.debug("Re-applying/propogating scraped values back to page");
-				this.assign(data);
-			}
-
-
-			this._log.trace("Setup done");
+			this._log.debug('Setting up binder...');
+			this._private.isSetup=true;
 		}
+		//Parse all instructions so they're ready to go (for speed later). This is also necessary in
+		//case there are inputs, else the first input event will be missed.
+		this.parseAllElems();
+
+		//Before outputting anything, scrape for any data so we can save it for intentional later use and/or
+		//so we can warn that you might have forgot to call .scrape('assign')
+		if(!this._private.scraped && !bu.isEmpty(this.scrape('return'))){
+			this._log.warn("Possibly overwriting data already in the DOM. Did you forget to call .scrape() "
+				+"before .setup()? Remember, keys which only exist in the DOM will be set to their Binder-"
+				+"value which is 'undefined' (which in turn may set certain inputs to their default value)"
+				,{inDom:this._private.scraped,inBinder:this.copy()});
+		}
+
+		//Output initial data to the DOM.
+		this.triggerUpdate();
+			
+
 		return this;
 	}
 
 
 	/*
-	* Scrape for data on all nodes connected to this binder, then return it without assigning
-	* to this instance
+	* Although it will happen automatically when the information is needed, this method will
+	* parse all bound elems right now
 	*
-	* @return object 	Data found on the html (regardless if it also exists in this._data)
+	* @return <Binder>
 	*/
-	Binder.prototype.scrape=function(){
+	Binder.prototype.parseAllElems=function(){
+		this.getOutputs().forEach(parseElem.bind(this));
+		return this;
+	}
+
+
+
+	/*
+	* Scrape for data on all nodes connected to this binder. The scraped data will be stored on this._private.scraped
+	*
+	* @param string whatToDo 	Accepted values:
+	*								'assign' --> default. assigns the scraped data and returns <Binder>
+	*                               'return' --> returns the scraped data without assigning it
+	*
+	* @return object|<Binder>
+	*/
+	Binder.prototype.scrape=function(whatToDo='assign'){
 		this._log.trace("Scraping DOM for values...");
+
+		//First get all the data...
 		var data={}, self=this;
 		this.getOutputs().forEach(function scrapeDataCallback(node){
 			let key=findKeyBoundToValue.call(self,node);
 			if(!key)
 				return;
 			let value=bu.getValueFromElem(node);
+			if(value===undefined || value==='')
+				return;
+			if(data.hasOwnProperty(key) && data[key]!=value)
+				this._log.warn(`Found different values for key '${key}' while scraping. Using the latter:`,data[key],value)
 			data[key]=value;
 		})
-		return data;
+
+		//Store it both for later access AND as a way to check if it's been done
+		this._private.scraped=data;
+
+		//...then decide what to do with it
+		if(whatToDo=='return'){
+			return data;
+		}else if(whatToDo!='assign'){
+			this._log.warn("E_INVAL. scrape() is defaulting to action 'assign'. Passed in value is not valid:",whatToDo);
+		}
+		this.assign(data);
+		return this;
 	}
 
 
 
-
-
-
-
-//2020-03-30: Not necessary anymore!
-	// /*
-	// * Mark up all existing input nodes will a class so they can subsequently be easily found
-	// *
-	// * @return array 		All newly added nodes
-	// */
-	// Binder.prototype.findNewInputs=function(){
-
-	// 	//Look among the known outputs
-	// 	var outputNodes=this.getOutputs();
-	// 	this._log.trace("Checking for new inputs among these outputs:",outputNodes)
-	// 	var inputNodes=outputNodes.filter(elem=>this.listenToInput(elem));
-
-	// 	if(inputNodes.length){
-	// 		this._log.info(`Found ${inputNodes.length} input nodes:`,inputNodes);
-	// 	}else if(!outputNodes.length){
-	// 		this._log.note('No output nodes found, so no inputs can exist.');	
-	// 	}else{
-	// 		this._log.debug('No input nodes found amoung output nodes:',this.getOutputs());
-	// 	}
-
-	// 	return inputNodes;
-
-	// }
-
-
-	// Binder.prototype.listenToInput=function(elem){
-	// 	//Dump non-inputs, else rename it for clarity
-	// 	if(!bu.isInput(elem)){
-	// 		return false;
-	// 	}
-	// 	var input=elem;
-
-	// 	//Check that it's not disabled, and it's new,
-	// 	if(input.disabled||input.classList.contains(this.inputClass)){
-	// 		return false;
-	// 	}
-		
-	// 	//...then check if their value is bound 
-	// 	let key=findKeyBoundToValue.call(this,input);
-	// 	if(!key){
-	// 		this._log.warn("Input's value doesn't seem to be bound to any key:",input);
-	// 		return false;
-	// 	}
-
-	// 	//These are the input types available: 
-	// 	//		https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input
-	// 	//...and there's "select"
-	// 	//Different types and we monitor different events
-	// 	var evt,type=input.getAttribute('type'), isText=false;
-	// 	if(input.tagName=='select'){
-	// 		evt='change';
-	// 	}else if(input.textarea=='input'){
-	// 		evt='input'; //works on mobile too
-	// 		isText=true;
-	// 	}else{
-	// 		switch(type){
-	// 			case "checkbox":
-	// 			case "range":
-	// 			case "radio":
-	// 			case "date":
-	// 			case "datetime-local":
-	// 			case "color":
-	// 			case "file":
-	// 			case "month":
-	// 			case "number":
-	// 			case "password": //passwords are only really submitted to stuff, so no live updates required
-	// 			case "time":
-	// 			case "week":
-	// 			case "image": //unsure, test it....
-	// 				//I think this fires as soon as you "pick" you're thing...
-	// 				evt='change';
-	// 				break;
-
-	// 			case "button":
-	// 			case "submit":
-	// 			case "reset":
-	// 				evt='click';
-	// 				break;
-
-	// 			case "text":
-	// 			case "email":
-	// 			case "search":
-	// 			case "tel":
-	// 			case "url":
-	// 				evt='input'; //works on mobile too
-	// 				isText=true;
-	// 				break;
-
-	// 			case "hidden":
-	// 				//Will not change
-	// 				return false;
-	// 		}
-			
-	// 	}
-
-
-
-	// 	//For text inputs...
-	// 	if(isText){
-	// 		//...add a keepalive timer that we can use to remove the
-	// 		//blocking-flag we're gonna set below vv
-	// 		input.xxxBindKeepalive=new dep.Timer();
-	// 		input.xxxBindKeepalive.on('timeout',()=>{
-	// 			input.removeAttribute('xxx-bind_ignore');
-	// 		})
-	// 		//...when not active anymore, force an update just to make sure the text reflects
-	// 		//whats actually bound to that key (on the off chance that somebody changed it 
-	// 		//during the last ignoreTimeout)
-	// 		input.addEventListener('onblur',()=>{
-	// 			this.forceUpdate(input); //this updates input even if ignore-flag is still set
-	// 		})
-	// 	}
-
-
-	// 	//Start listening to input, but leave a way to stop
-	// 	var binderListener=()=>{
-
-	// 		//debounce text inputs to prevent loops and the risk of loosing the last few typed letters
-	// 		if(isText){
-	// 			if(!input.xxxBindKeepalive.running)
-	// 				input.setAttribute('xxx-bind_ignore',"");
-	// 			input.xxxBindKeepalive.restart(null,this._private.options.ignoreTimeout);
-	// 		}
-
-	// 		if(type == 'checkbox'){
-	// 			var value = input.checked 
-	// 		} else {
-	// 			var value = input.value
-	// 		}
-
-	// 		//...and update the value on every change. NOTE: since we update every time it 
-	// 		//my not be a good idea to bind textboxes where users write a whole novel...
-	// 		this.set(key,value);
-	// 		// //Queue setting using the relay we defined in the constructor
-	// 		// self._private.textBuffer.bufferEvent(key, value)
-	// 	}	
-	// 	input.addEventListener(evt, binderListener);
-	// 	input.xxxBindUnlisten=()=>input.removeEventListener(evt,binderListener);
-
-	// 	//Finally give the input a class so we don't check it again
-	// 	input.classList.add(this._private.inputClass);
-
-
-	// 	return true;
-	// }
-//2020-03-30: Not necessary anymore ^^
 
 
 
@@ -886,6 +729,7 @@ module.exports=function exportBinder(dep,proto){
 					msg="Single node passed in, finding all its children connected to this binder:";
 					break block;
 			}
+			//If we're still running that means x is a string or undefined...
 
 			nodes=Array.from(document.getElementsByClassName(this._private.targetClass)); 
 			if(!nodes.length){
@@ -1006,6 +850,11 @@ module.exports=function exportBinder(dep,proto){
 
 			//Then loop through said keys, fetching the value of it and propogating that value to the nodes
 			Object.entries(keyNodesObj).forEach(([key,_nodes])=>{
+
+
+//STOPSTOP 2020-04-08: If this.get() returns undefined, should be really propogate... because with initial values that
+//						could create issues eg. when setting a range input which will cause it to set to the middle value instead
+
 				propogateToNodes.call(this,_nodes,{key,value:this.get(key)});
 			});
 		}catch(err){
@@ -1041,7 +890,8 @@ module.exports=function exportBinder(dep,proto){
 					throw `No instructions for '${event.key}' or '*'`
 				}else{
 					//Now loop through that array and apply each inst
-					for(inst of instructions){
+
+					for(inst of instructions.values()){
 						if(inst==node[V_INST] && node.hasAttribute('inputting')){
 							this._log.note("Not outputting to currently receiving input.",inst,event, node);
 						}else{
