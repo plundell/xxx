@@ -12,8 +12,8 @@
 
 
 (function loadXXX(){
-	if(!window)
-		throw new Error("ESCOPE. This script should have access to the 'window' global.");
+	if(typeof window!='object' || !window)
+        throw new Error("ESCOPE. Could not access the 'window' object. Cannot load xxx-framework.");
 
 	console.log('Loading xxx-framework...');
 

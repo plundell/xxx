@@ -16,8 +16,8 @@
     "url": "git+https://github.com/plundell/xxx.git"
   },
   "dependencies": {
-    "libbetter": "^1.0.1",
-    "smarties": "^1.0.1"
+    "libbetter": "^1.0.x",
+    "smarties": "^1.0.x"
   },
   "devDependencies": {
     "webpack": "^4.42.1",
