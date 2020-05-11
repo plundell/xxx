@@ -5,9 +5,6 @@
 * @license Apache-2.0
 * @depends libbetter
 * @depends smarties
-* @exports function   This framework exports an "exporter function" which should be called with the 
-*                     dependencies to get the "real exported contents". It also creates a getter on
-*                     window.xxx which runs said exporter if the dependencies are also set on the window
 */
 
 
