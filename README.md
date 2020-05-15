@@ -1,5 +1,5 @@
 # xxx
-A lightweight front-end framework that provides two-way binding, repeating templates and UI navigation
+A lightweight front-end framework that provides two-way binding, repeating templates and UI navigation, with almost no dependencies.
 
 ## Outline
 The library consists of 3 constructors that each provides one of the above mentioned features; Binder, Repeater, and Navigator. You set instructions straight on HTML <b>elements</b> in the DOM via attributes like 'xxx-bind', then create <b>instances</b> of the classes to consume and execute those actions. Elements are linked to instances via a "target class" which can be added to any elements classList at any time. The classes work together or alone.
