@@ -924,21 +924,29 @@ module.exports=function exportRepeater(dep,proto){
 						clones.splice(i,1);
 						continue;
 					}else{
-						var rule=c.getAttribute(attr);
-						rule=bu.tryJsonParse(rule, true) || [rule]; 
-				
-						//if a single value was given ^, then it was the criteria, so we add pattern and operator
-						if(rule.length==1){
-							rule.unshift('$','==');
-						}else if(c.getAttribute(rule[0]).includes('#')){
-							this._private.indexDependentPatterns='t';  
+						try{
+							var rule=c.getAttribute(attr);
+							rule=bu.tryJsonParse(rule, true) || [rule]; 
+					
+							if(rule.length==1){
+								//if a single value was given ^, then it was the criteria, so we add pattern and operator
+								rule.unshift('$','==');
+							// }else if(c.getAttribute(rule[0]).includes('#')){  //2020-05-19: <-- that's just wrong, right?
+							}else if(rule[0].includes('#')){
+								this._private.indexDependentPatterns='t';  
 
-//TODO: keep seperate track if template-choice is '#'
-							this._log.warn("Slow template chooser:",rule);
+	//TODO: keep seperate track if template-choice is '#'
+								this._log.warn("Slow template chooser:",rule);
+							}
+
+							//now re-save the full rule
+							c.setAttribute(attr,JSON.stringify(rule));
+
+						}catch(err){
+							this._log.error(`Removing bad template:`,c,rule,err); 
+							clones.splice(i,1);
+							continue;
 						}
-
-						//now re-save the full rule
-						c.setAttribute(attr,JSON.stringify(rule));
 					}
 				}
 			}
