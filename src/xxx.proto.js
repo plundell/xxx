@@ -18,14 +18,17 @@
 module.exports=function exportXXX(dep){
 
 	//The passed in object should contain all the dependencies.
-	function missingDependency(which){throw new Error("xxx-framework was initialized without/before a required dependency: "+which);}
+	function missingDependency(which){
+		console.warn('Dependency:',dep);
+		throw new Error("xxx-framework was initialized without/before a required dependency: "+which);
+	}
 	if(!dep.BetterUtil) missingDependency('BetterUtil');
 	if(!dep.BetterLog) missingDependency('BetterLog');
 	if(!dep.BetterEvents) missingDependency('BetterEvents');
 	if(!dep.Smarties) missingDependency('Smarties');
 
-
 	const bu = dep.BetterUtil
+
 
 
 	//Is populated and returned/exported at bottom
@@ -774,12 +777,13 @@ module.exports=function exportXXX(dep){
 	* @param string|number key 		The Repeater index or the Binder key. Type is not checked but may be converted to primitive.
 	* @param any value 				The value of the Repeater/Binder at that $key
 	* @param string pattern 		A pattern like "#-${me.age}${foo}banan#hat"
-	* @opt any node 				INCLUDED AS LAST ITEM TO LOG FOR EASY DEBUGGING, USED FOR NOTHING ELSE
+	* @opt any node 				USED ONLY FOR LOGGING/EASY DEBUGGING
 	*
 	* @throw <ble TypeError> 		If $pattern isn't a string 
 	* @throw <ble EMISSMATCH> 		If $pattern contains ${foo} when value is not complex
 	*
 	* @return any|primitive 		If $pattern == '$' or '#' than anything can be returned, else a primitive is guaranteed
+	* @call(<xxx instance>) 		For logging purposes only
 	*/
 	function applyPattern(key,value,pattern,node=undefined){
 
@@ -799,7 +803,7 @@ module.exports=function exportXXX(dep){
 		//then I'm afraid that function will just have to use '$' and find the prop itself
 
 
-		dep.bu.checkType('string',pattern);
+		bu.checkType('string',pattern);
 		let onComplexPattern=(value===undefined||value===null?'empty':typeof value=='object'?'':'throw');
 
 		//Let's say we have
@@ -824,11 +828,10 @@ module.exports=function exportXXX(dep){
 					if(onComplexPattern=='empty'){
 						return '';
 					}else if(onComplexPattern=='throw'){
-						log.makeError("Got complex pattern but primitive value.",{pattern,part,value})
-							.setCode('EMISSMATCH').throw();
+						log.throwCode('EMISSMATCH',"Got complex pattern but primitive value.",{pattern,part,value});
 					}
 					
-					let val=m[1].contains('.') ? dep.bu.nestedGet(value,m[1].split('.')) : value[m[1]]
+					let val=m[1].includes('.') ? bu.nestedGet(value,m[1].split('.')) : value[m[1]]
 					//"undefined" is never going to be what we want in the middle of a string, so warn an use an empty one
 					return ((val=='undefined'||val==undefined)? '' : val)
 				}
@@ -840,15 +843,15 @@ module.exports=function exportXXX(dep){
 
 		//Now we have a string, but perhaps it's a representation of a primitive, eg. "false" which we want to
 		//to be able to evaluate falsey
-		var resolved=dep.bu.stringToPrimitive(string)
+		var resolved=bu.stringToPrimitive(string)
 
 		//Finally we want to log something. Since this method is also used to test which template should be used by
 		//Repeater we can't well warn every time it produces an empty string since that will be most of the time, so
 		//we've included a hidden 4th argument...
 		if(resolved==='' && arguments[3]!='noWarn'){
-			log.warn(`Resolved pattern to empty string:`,{pattern,value,key},node);
+			log.warn(`Resolved pattern to empty string:`,{pattern,value,key,node,'this':this});
 		}else{
-			log.trace(`Resolved pattern '${pattern}':`,[value, '=>',resolved],node);
+			log.trace(`Resolved pattern '${pattern}':`,[value, '=>',resolved],{node,'this':this});
 		}
 
 		//Now we want to log something
@@ -887,9 +890,9 @@ module.exports=function exportXXX(dep){
 				
 				//If a pattern was given, apply it now to both new and old value
 				if(x.pattern){
-					x.value=applyPattern.call(this,x.key,x.value,x.pattern); //throws on bad pattern
+					x.value=applyPattern.call(this,x.key,x.value,x.pattern,node); //throws on bad pattern
 					if(x.old!=undefined){
-						x.old=applyPattern.call(this,x.key, x.old, x.pattern);
+						x.old=applyPattern.call(this,x.key, x.old, x.pattern,node);
 					}
 				}
 

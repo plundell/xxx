@@ -455,7 +455,7 @@ module.exports=function exportBinder(dep,proto){
 				if(record.type=='attributes'){
 					//Figure out which classes where added or which were removed (both can happen in the name record)
 					let curr=record.target.className.split(' ')
-						,old=record.oldValue.split(' ')
+						,old=(record.oldValue ? record.oldValue.split(' ') : [])
 						,diff=bu.arrayDiff(curr,old,'noCheck'); //noCheck=>don't check type, we know they're arrays
 					;
 					
@@ -495,19 +495,21 @@ module.exports=function exportBinder(dep,proto){
 					//different <Binder>s
 					let i=0;
 					for(let node of record.addedNodes){
-						var classes=Binder._instances.keys();
+						var classes=Array.from(Binder._instances.keys());
 						if(bu.nodeType(node)=='element'){ //ignore 'text', 'comment' and 'attribute' nodes
-							Object.keys(bu.multiQuerySelector(node,classes,'group','self','class')).forEach(
-								cls=>{
-									Binder._instances.get(cls).triggerUpdate(node);
-									i++
+							Object.entries(bu.multiQuerySelector(node,classes,'group','self','class'))
+								.forEach(([cls,nodes])=>{
+									if(nodes.length){
+										Binder._instances.get(cls).triggerUpdate(node);
+										i++
+									}
 								}
 							)
 						}
 					}
 
 					if(log.options.lowestLvl<3){
-						log.debug(`It took ${bu.timerStop(start,'nano')}ns to match ${i} Binders`);
+						log.debug(`It took ${bu.timerStop(start,'micro')} \u00B5s to match ${i} Binders`);
 					}
 
 				}
@@ -586,7 +588,7 @@ module.exports=function exportBinder(dep,proto){
 			propogateToNodes.call(this,nodes,event);
 		
 		}else if(this._log.options.lowestLvl<3){
-			self._log.last().addHandling(`Ignoring <${evt}> event for key '${key}'`);
+			this._log.last().addHandling(`Ignoring <${event.evt}> event for key '${event.key}'`);
 				//^The last entry on our log will be the 'no nodes connected to this binder' created by getNodeArray()
 		}
 	}
@@ -721,12 +723,12 @@ module.exports=function exportBinder(dep,proto){
 				case 'nodelist':
 					x=Array.from(x);
 				case 'array':
-					nodes=x.filter(node=>node.classList.contains(this._private.targetClass)); 
 					msg="List of nodes passed in, returning only those connected to this binder:";
+					nodes=x.filter(node=>node.classList.contains(this._private.targetClass)); 
 					break block;
 				case 'node':
-					bu.multiQuerySelector(x,this._private.targetClass,'self','class');
-					msg="Single node passed in, finding all its children connected to this binder:";
+					msg="Single node passed in, among it's children these are the ones connected to this binder:";
+					nodes=bu.multiQuerySelector(x,this._private.targetClass,'self','class');
 					break block;
 			}
 			//If we're still running that means x is a string or undefined...
@@ -839,7 +841,7 @@ module.exports=function exportBinder(dep,proto){
 			//First get the nodes we're going to update
 			var nodes=getNodeArray.call(this,which);
 			if(!nodes.length){
-				this._log.warn("Trying to update of empty list of nodes, did this fire too soon? Search term:",which);
+				this._log.warn("Trying to update of empty list of nodes, did this fire too soon? Called on:",which);
 				return;
 			}
 

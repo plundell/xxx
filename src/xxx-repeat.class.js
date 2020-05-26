@@ -317,7 +317,7 @@ module.exports=function exportRepeater(dep,proto){
 	*/
 	Repeater.prototype.getNodesWithInstructions=function(parent){
 		parent=parent||this._target
-		cX.checkType('node',parent);
+		bu.checkType('node',parent);
 
 		var nodes=Array.from(parent.getElementsByClassName(this._private.targetClass));
 		if(parent && parent.classList.contains(this._private.targetClass)){
@@ -633,18 +633,18 @@ module.exports=function exportRepeater(dep,proto){
 				//Get effected range AFTER adding
 				let last=this.length-1;
 				if(this._private.indexDependentPatterns && event.key<last){
-					indexesAffected=cX.range(event.key+1,last);
+					indexesAffected=bu.range(event.key+1,last);
 				}
 
 			}else{
 				elem=this._target.children[event.key]
 				//...for all the rest it must, so check
 				if(bu.varType(elem)!='node'){
-					this._log.error("Child #"+event.key+" does not exist, cannot propogate event: "+evt);
+					this._log.error("Child #"+event.key+" does not exist, cannot propogate event: "+event.evt);
 					return;
 				}
 
-				switch(evt){
+				switch(event.evt){
 					case 'indexChange':
 						// This case is almost a copy of 'change'v
 
@@ -662,7 +662,7 @@ module.exports=function exportRepeater(dep,proto){
 						break;
 
 					case 'change': 
-						if(!elem._checkRightTemplate(value)){
+						if(!elem._checkRightTemplate(event.value)){
 							// this._target.removeChild(elem);		
 							gracefullyRemoveElement.call(this,elem);
 							elem=insertItem.call(this,event);
@@ -679,7 +679,7 @@ module.exports=function exportRepeater(dep,proto){
 					 	//Get effected range BEFORE deleting
 					 	let last=this.length-1;
 					 	if(this._private.indexDependentPatterns && event.key<last){
-					 		indexesAffected=cX.range(event.key,last);
+					 		indexesAffected=bu.range(event.key,last);
 					 	}
 
 						// this._target.removeChild(elem);	
@@ -703,7 +703,7 @@ module.exports=function exportRepeater(dep,proto){
 
 
 					default:
-						this._log.note('Unhandled event: '+evt);
+						this._log.note('Unhandled event: '+event.evt);
 				}
 			}
 
@@ -718,11 +718,11 @@ module.exports=function exportRepeater(dep,proto){
 
 			//Kindof propogate the event from the underlying smarty...
 			event.target=elem
-			this.emit(event);
+			this.emit(event.evt,event);
 			
 		
 		}catch(err){
-			this._log.error("BUGBUG",err);
+			this._log.error("BUGBUG",err,event);
 		}
 	}
 
@@ -1061,11 +1061,11 @@ module.exports=function exportRepeater(dep,proto){
 			//If it does have the attribute (which will be the case with every new clone)...
 			}else{
 				//...just make it live and save it to the prop we checked first ^^...
-				elem.xxxRepeat=bu.getJsonAttr(node,'xxxRepeat');
+				elem.xxxRepeat=bu.getJsonAttr(elem,'xxxRepeat');
 
 				//The attr has now served it's purpose, the only reason to keep it is debugging
 				if(!this._private.options.debugMode)
-					node.removeAttribute('xxxRepeat');
+					elem.removeAttribute('xxxRepeat');
 			}
 
 			//If we found any instructions...
@@ -1204,7 +1204,7 @@ module.exports=function exportRepeater(dep,proto){
 				//Now check the rule
 				if(checkTemplateRule.call(this,insertAt,value,rule,t)){
 					var clone=t.cloneNode(true);
-					this._log.debug("Rule matched, cloned template:",checkedRule,clone);
+					this._log.debug("Rule matched --> cloned template:",rule,clone);
 				
 					//Define func to check if a new value would still choose this template
 					clone._checkRightTemplate=(newValue)=>checkTemplateRule.call(this,clone._repeatIndex,newValue,rule,clone)
