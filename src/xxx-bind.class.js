@@ -48,7 +48,7 @@ module.exports=function exportBinder(dep,proto){
 	function Binder(targetClass, options=null,data=null) {
 
 		//Register this instance on Binder._instances
-		proto.addInstance.call(this,targetClass);
+		proto.addInstance('Binder',targetClass);
 
 		options=options||{};
 		//Make sure we log as the binder class
@@ -57,8 +57,12 @@ module.exports=function exportBinder(dep,proto){
 		
 		//Are we upgrading an existing <SmartObject>... (see upgradeSmarty())
 		if(this===data){
-			this._log.info("Turning this smarty into a Binder");
-			this.__proto__=Binder.prototype;
+			//Since changing .__proto__ is very slow and deprecated we instead set all the methods of
+			//the Binder prototype on the SmartObject, but make them non-enumerable
+			this._log.debug("Setting Binder.prototype methods as non-enumerable straight on this SmartObject, incl constructor");
+			for(let method of Object.getOwnPropertyNames(Binder.prototype)){
+				Object.defineProperty(this,method,{enumerable:false,configurable:true,value:Binder.prototype[method]});
+			}
 
 			//Only options meant for Binder is allowed, the rest will be whatever the smarty is already using
 			options=bu.subObj(options,['scrapeForData','ignoreTimeout','name'],'excludeMissing');
@@ -159,10 +163,17 @@ module.exports=function exportBinder(dep,proto){
 	* @param <SmartObject> smarty
 	* @return $smarty
 	*/
-	Binder.upgradeSmarty=function upgradeSmarty(targetClass,options,smarty){
-		if(!smarty || smarty.isSmart!='SmartObject')
-			bu._log.makeTypeError("<SmartObject>",smarty).throw();
+	Binder.upgradeSmarty=function upgradeSmarty(...args){
+		var smarty=bu.extractItems(args,item=>item&&item.isSmart=='SmartObject')[0];
+		if(!smarty)
+			bu._log.makeError("Expected a <SmartObject> to upgrade but none was passed").setCode('TypeError').throw();
 
+
+		var targetClass=bu.getFirstOfType(args, 'string')
+			,options=bu.getFirstOfType(args, 'object')||null
+		;
+
+		smarty._log.info(`Upgrading smarty to binder '${targetClass}'`);
 		Binder.call(smarty,targetClass,options,smarty);
 
 		return smarty;
@@ -854,7 +865,7 @@ module.exports=function exportBinder(dep,proto){
 			Object.entries(keyNodesObj).forEach(([key,_nodes])=>{
 
 
-//STOPSTOP 2020-04-08: If this.get() returns undefined, should be really propogate... because with initial values that
+//TODO 2020-04-08: If this.get() returns undefined, should we really propogate... because with initial values that
 //						could create issues eg. when setting a range input which will cause it to set to the middle value instead
 
 				propogateToNodes.call(this,_nodes,{key,value:this.get(key)});

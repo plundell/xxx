@@ -39,7 +39,7 @@ module.exports=function exportNavigator(dep,proto){;
 	function Navigator(targetClass, options={},states=null) {
 		
 		//Register this instance on Navigator._instances
-		proto.addInstance.call(this,targetClass);
+		proto.addInstance('Navigator',targetClass);
 
 		proto.setupPrivateLogEvents.call(this,targetClass,options);
 

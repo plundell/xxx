@@ -96,15 +96,16 @@ module.exports=function exportXXX(dep){
 		bu.checkType('node',node);
 		const log=getLog(this);
 		try{
-			//Initiate array that will be returned (unless 'group' is passed vv)
-			var instructions=[];
-
-			var baseAttr=this.constructor._baseAttr;
-			var cb=bu.getFirstOfType(optional, 'function');
-			var extract=optional.includes('extract');
-			var group=optional.includes('group');
-			var emptyOK=optional.includes('emptyOK'); //Since individual nodes in eg. templates with multiple children
-													//may not have instructions, one may want to NOT warn
+			//Initiate array that will be returned (unless 'group' is passed vv), and parse any passed in flags
+			var instructions=[]
+				,baseAttr=this.constructor._baseAttr
+				,cb=bu.getFirstOfType(optional, 'function')
+				,extract=optional.includes('extract')
+				,group=optional.includes('group')
+				,emptyOK=optional.includes('emptyOK') //Since individual nodes in eg. templates with multiple children
+													  //may not have instructions, one may want to NOT warn
+				,keyIsPattern=optional.includes('keyIsPattern')
+			;
 
 			/*
 			* Adds each instruction to the overall return array
@@ -113,32 +114,40 @@ module.exports=function exportXXX(dep){
 			* @no_throw
 			*/
 			var addInstruction=(inst)=>{
-				//Use the global key if none is specified (ie. the key used for all instructions for the node, see vv)
-				inst.key=inst.key||globalKey;
-
-				let t=bu.checkProps(inst,{
-					fn:'string'
-					,key:['number','string','array']
-					,args:['array','primitive','undefined']
-					,arg:['primitive','undefined'] //only used if args==undefined. the resulting prop will still be args=[...]
-					,test:['array','primitive','undefined']
-				});
-				//REMEMBER: ALL keys on the inst obj are passed to the action function, BUT, also remember
-				//that props on the 'event' object supersede them, and the prop 'node' will be set to the
-				//node being acted upon
+				//REMEMBER: ALL keys on the inst obj are passed to the action function (not just those listed here), BUT, also remember
+				//that props on the 'event' object supersede them, and the prop 'node' will be set to the target node unappologetically,
+				//so be careful which props you use...
 				
+				var propTypes={ 
+					fn:'string'
+					,key:['number','string','array']  //one of these two will
+					,pattern:['string']               //be deleted below
+					,args:['array','primitive','undefined']
+					,test:['array','primitive','undefined']
+				}
+
+				//Allow different names for certain props
+				inst.args=inst.hasOwnProperty('args')?inst.args:inst.arg;
+				if(keyIsPattern){
+					inst.pattern=inst.pattern||inst.key;
+					delete inst.key;
+					delete propTypes.key;
+				}else{
+					inst.key=inst.key||globalKey; //Use the global key if none is specified in this instruction
+					delete propTypes.pattern;
+				}
+
+				//Now check that we have the above props, throwing on fail (ie. not including inst...)
+				let t=bu.checkProps(inst,propTypes);
+
 				//All functions are lower case, but they can be written however just to make it more legible
 				inst.fn==inst.fn.toLowerCase();
 				
-
 				//Args should be an array (if nothing else an empty one)...
 				if(t.args=='primitive')
 					inst.args=[inst.args]
 				else if(t.args=='undefined'){
-					if(t.arg=='primitive')
-						inst.args=[inst.arg];
-					else
-						inst.args=[];
+					inst.args=[];
 				}
 
 				
@@ -337,10 +346,10 @@ module.exports=function exportXXX(dep){
 	function setDisplay(showOnTruthy, x){
 		var c=test2.call(this,x);
 		if(c.test==showOnTruthy){
-			this._log.trace('Showing node:',x.node,c.logstr);
+			this._log.trace('Showing node'+c.logstr,x.node);
 			showElement(x.node);
 		}else{
-			this._log.trace('Hiding node:',x.node,c.logstr);
+			this._log.trace('Hiding node'+c.logstr,x.node);
 			hideElement(x.node);
 		}
 		return;
@@ -462,17 +471,17 @@ module.exports=function exportXXX(dep){
 
 		if(c.test){
 			if(x.node.classList.contains(cls)){
-				this._log.trace(`Node already has class '${cls}'.`,x.node);
+				this._log.trace(`Keeping existing class '${cls}' on node`+c.logstr,x.node);
 			}else{
-				this._log.trace(`Adding class '${cls}' to node:`,x.node);
+				this._log.trace(`Adding class '${cls}' to node`+c.logstr,x.node);
 				x.node.classList.add(cls);
 			}
 		}else{
 			if(x.node.classList.contains(cls)){
-				this._log.trace(`Removing class '${cls}' from node:`,x.node);
+				this._log.trace(`Removing class '${cls}' from node`+c.logstr,x.node);
 				x.node.classList.remove(cls);
 			}else{
-				this._log.trace(`Node correctly doesn't have class '${cls}'.`,x.node);
+				this._log.trace(`Leaving class '${cls}' off node`+c.logstr,x.node);
 			}
 		}
 		return;
@@ -525,7 +534,7 @@ module.exports=function exportXXX(dep){
 		 	,c=test2.call(this,x)
 			,v=c.test ? trueValue : falseValue
 		;
-		this._log.trace(`Setting prop '${prop}' = ${v}`,x.node,c.logstr);
+		this._log.trace(`Setting prop '${prop}' = ${v}${c.logstr}`,x.node);
 		x.node[prop]=v; 
 		return;
 	}
@@ -541,7 +550,7 @@ module.exports=function exportXXX(dep){
 	* 	@prop array 	   args
 	*	  @arg string 		attrName		The attribute to set
 	*	  @opt string 		trueValue 		Defaults to $value. The value to set if the test returns truthy.
-	* 	@opt array 			 test  			  @see test2(). A falsey test removes the 
+	* 	@opt array 		   test  			  @see test2(). A falsey test removes the 
 	*								    		attribute entirely from the element.
 	* @return void
 	*
@@ -554,10 +563,10 @@ module.exports=function exportXXX(dep){
 			,c=test2.call(this,x)
 		;
 		if(c.test){
-			this._log.trace(`Setting attr '${attrName}'='${trueValue}' on node:`,x.node,c.logstr);
+			this._log.trace(`Setting attr '${attrName}'='${trueValue}' on node ${c.logstr}`,x.node);
 			x.node.setAttribute(attrName,trueValue); 
 		}else{
-			this._log.trace(`Removing attr '${attrName}' from node:`,x.node,c.logstr);
+			this._log.trace(`Removing attr '${attrName}' from node ${c.logstr}`,x.node);
 			x.node.removeAttribute(attrName); 
 		}
 		return;
@@ -763,8 +772,7 @@ module.exports=function exportXXX(dep){
 		else{
 			var obj={test:!bu.isEmpty(x.value,'*')} //'*'=> zero, null and false are considered empty
 			if(this._log.options.lowestLvl<3){
-				obj.logstr=bu.logVar(x.value)
-				obj.logstr=(obj.test ? '<not empty> ' : '<empty> ')+obj.logstr
+				obj.logstr=` because ${bu.logVar(x.value)} is considered ${obj.test?'NOT':''} empty.`;
 			}
 			return obj;
 		}
@@ -780,22 +788,26 @@ module.exports=function exportXXX(dep){
 	* @opt any node 				USED ONLY FOR LOGGING/EASY DEBUGGING
 	*
 	* @throw <ble TypeError> 		If $pattern isn't a string 
-	* @throw <ble EMISSMATCH> 		If $pattern contains ${foo} when value is not complex
+	* @throw <ble EMISMATCH> 		If $pattern contains ${foo} when value is not complex
 	*
 	* @return any|primitive 		If $pattern == '$' or '#' than anything can be returned, else a primitive is guaranteed
 	* @call(<xxx instance>) 		For logging purposes only
 	*/
 	function applyPattern(key,value,pattern,node=undefined){
 
+		bu.checkType('string',pattern);
+
 		var log=getLog(this);
+		var logstr=`Resolved pattern '${pattern}'`;
+		var loginfo={input:{key,value},pattern,node,'xxx':this};
 
 		//Start with 2 situations where any value can be returned, including undefined
 		if(pattern=='$'){
-			log.trace("Pattern '$', using original value:",value,node);
+			log.trace(logstr+" to the whole value:",value,node);
 			return value;
 		}
 		if(pattern=='#'){
-			log.trace("Pattern '#', using key only:",key,node);
+			log.trace(logstr+"to the key:",key,node);
 			return key;
 		}
 
@@ -803,8 +815,7 @@ module.exports=function exportXXX(dep){
 		//then I'm afraid that function will just have to use '$' and find the prop itself
 
 
-		bu.checkType('string',pattern);
-		let onComplexPattern=(value===undefined||value===null?'empty':typeof value=='object'?'':'throw');
+		var onComplexPattern=(value===undefined||value===null?'empty':typeof value=='object'?'':'throw');
 
 		//Let's say we have
 		//	key=7 		value={foo:"bar",me:{age:4}}		pattern="#-${me.age}${foo}banan#hat"
@@ -828,7 +839,7 @@ module.exports=function exportXXX(dep){
 					if(onComplexPattern=='empty'){
 						return '';
 					}else if(onComplexPattern=='throw'){
-						log.throwCode('EMISSMATCH',"Got complex pattern but primitive value.",{pattern,part,value});
+						log.throwCode('EMISMATCH',`Pattern contains complex part ('${part}'), but input is primitive.`,loginfo);
 					}
 					
 					let val=m[1].includes('.') ? bu.nestedGet(value,m[1].split('.')) : value[m[1]]
@@ -849,9 +860,9 @@ module.exports=function exportXXX(dep){
 		//Repeater we can't well warn every time it produces an empty string since that will be most of the time, so
 		//we've included a hidden 4th argument...
 		if(resolved==='' && arguments[3]!='noWarn'){
-			log.warn(`Resolved pattern to empty string:`,{pattern,value,key,node,'this':this});
+			log.warn(logstr+' to empty string.',loginfo);
 		}else{
-			log.trace(`Resolved pattern '${pattern}':`,[value, '=>',resolved],{node,'this':this});
+			log.trace(logstr+` => '${resolved.toString()}'`,loginfo);
 		}
 
 		//Now we want to log something
@@ -942,14 +953,14 @@ module.exports=function exportXXX(dep){
 	*
 	* @call(xxx instance)
 	*/
-	function addInstance(targetClass){
+	function addInstance(cName, targetClass){
 		const log=getLog(this);
 		try{
 			bu.checkType('string',targetClass);
 			if(targetClass=='undefined')
 				throw "The string 'undefined' is not suitable as targetClass";
 		}catch(err){
-			log.throw(`Bad targetClass (arg#1), cannot setup xxx.${this.constructor.name}.`,err)
+			log.throw(`Bad targetClass (arg#1), cannot setup xxx.${cName}.`,err)
 		}
 		//Check with all xxx types if an instance has already been registered with this class
 		var name;
@@ -962,7 +973,7 @@ module.exports=function exportXXX(dep){
 		}
 		
 		//If still running, register it
-		this.constructor._instances.set(targetClass,this);
+		_export[cName]._instances.set(targetClass,this);
 	}
 
 
