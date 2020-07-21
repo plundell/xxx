@@ -129,11 +129,10 @@ module.exports=function exportRepeater(dep,proto){
 				,get:()=>this._log.throwCode("ESEQ","repeater._data has not been set yet.") //throw until data gets set
 				,set:(data)=>{
 					//Make sure we have a SmartArray...
-					var sArr;
 					if(bu.checkType(['array','<SmartArray>'],data)=='array'){
 						//Create new smarty...
 						// this._log.note("Setting up new smarties.Array with options:",this._private.options);
-						sArr=new dep.Smarties.Array(this._private.options);
+						var sArr=new dep.Smarties.Array(this._private.options);
 						
 						if(data){ //...and add all data to it
 							sArr.concat(data);
@@ -142,11 +141,8 @@ module.exports=function exportRepeater(dep,proto){
 							this._log.note("Creating empty smartArray on repeater. Don't forget to populate it later!");
 						}
 					}else{
-						if(data.isSmart=='SmartArray'){
-							this._log.debug("Using passed in smartArray on repeater:",data);
-							sArr=data;
-							break;
-						}
+						this._log.debug("Using passed in smartArray on repeater:",data);
+						sArr=data;
 					}
 
 					//...and reconfigure ._data with it, making it non-conf, non-write since _data is permanent for now
