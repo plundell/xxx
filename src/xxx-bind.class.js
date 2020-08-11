@@ -18,15 +18,22 @@
 *	  an empty smarty and replicate its events.
 *	- Outputting to the DOM is done by listening to events on the underlying smarty
 *	- Inputting from the DOM is done by listening to 'input' events on <body> (ie. you can affect how/when
-*	  the binder receives input by intercepting these events before they reach <body>, which is exactly
-*	  what Binder.throttle() does). 
+*	  the binder receives input by intercepting these events before they reach <body>, which is eg. hwo
+*	  Binder.throttle() works. 
+*
+*     NOTE: we're using input vs change events since 'change' usually doesn't fire until an input looses focus
+*           which would not be real two-way binding. If do want this functionality you'll have to intercept the
+*			'input' event and re-fire it when the elem looses focus		  
+*     NOTE: events are only emitted by elements when they are changed by the user, NOT when they are changed
+*           programatically via eg. a Binder, ie. loops cannot be created that way... however input can still
+*           be lost, ctrl-f INPUT LOSS
 */
 module.exports=function exportBinder(dep,proto){
 
 	const bu=dep.BetterUtil;
 
 	const INSTRUCTIONS="xxxBindInstructions"
-	const BINDER="xxxBinder"
+	const BINDER_FLAG="xxxBinder"
 	const V_INST="xxxBind_valInst"
 	const KEY="xxxBind_key"
 
@@ -111,8 +118,10 @@ module.exports=function exportBinder(dep,proto){
 		proto.setupActions.call(this);
 
 
-		//Listen to events emitted by self, and output data from them
+		//For outputting of data from us to the DOM we listen to 'event' and propogate... 
 		this.on('event',dataEventCallback.bind(this));
+		 //NOTE: that these events may stem from a child smarty
+		 //TODO 2020-07-30: Events handled by children should not be handled again...
 
 
 		//If there are already outputs and we have initial data, propogate it now! 
@@ -160,7 +169,11 @@ module.exports=function exportBinder(dep,proto){
 
 	/*
 	* Create a Binder on top of an existing smarty
-	* @param <SmartObject> smarty
+	*
+	* @param @anyorder <SmartObject> smarty
+	* @param @anyorder string targetClass
+	* @param @anyorder object options
+	*
 	* @return $smarty
 	*/
 	Binder.upgradeSmarty=function upgradeSmarty(...args){
@@ -255,7 +268,7 @@ module.exports=function exportBinder(dep,proto){
 	Binder._forgetElem=forgetElem;
 	function forgetElem(elem){
 		//DevNote: If you create another prop in some function, you should add it to this list
-		delete elem[BINDER];
+		delete elem[BINDER_FLAG];
 		delete elem[INSTRUCTIONS];
 		delete elem[KEY];
 		delete elem[V_INST];
@@ -273,15 +286,15 @@ module.exports=function exportBinder(dep,proto){
 	*/
 	Binder._getBinder=getBinder;
 	function getBinder(elem){
-		if(!elem.hasOwnProperty(BINDER)){
+		if(!elem.hasOwnProperty(BINDER_FLAG)){
 			//Look for a binder given an elements classes, saving it if found
 			let cls=Array.from(elem.classList).find(cls=>Binder._instances.has(cls));
 			if(cls){
-				elem[BINDER]=Binder._instances.get(cls);
+				elem[BINDER_FLAG]=Binder._instances.get(cls);
 			}
 		}
 		//Now return what may be a <Binder> or what may be undefined
-		return elem[BINDER];
+		return elem[BINDER_FLAG];
 	}
 
 	/*
@@ -403,23 +416,29 @@ module.exports=function exportBinder(dep,proto){
 	Binder._setupTwoWayBinding=bu.once(function setupTwoWayBinding(){
 		
 		/*
-		  Listen for all input events, but if the target hasn't been marked by ^, ignore it.
+		  Listen for all 'input' events which are emitted on EVERY CHANGE, unlike the 'change' event
+		  which usually fires on focusout.
 		 
-		  NOTE: we update the underlying binder on EVERY SINGLE INPUT event, so for inputs which
-		  		produce them in large quantities it may be wise to throttle or debounce them at
-		 		the source
+		  ProTip: for inputs which produce large quantities of input events in rapid succession it may 
+		          be wise to throttle or debounce them at the source element instead of when the underlying
+		          smarty outputs them, that way this handler gets less busy
 		*/
 		document.body.addEventListener('input',binderInputEventHandler,{passive:true, capture:false})
 		
 		/*
-		  Inputs can be focused upon, and not before being focused upon can they produce 'input' events 
-		  which we may want to listen to if the input is bound to a <Binder>. So listen for 'focusin' events
-		  on the <body> and use them to attempt to parse the target. If it finds a binder it sets a prop 
-		  which binderInputEventHandler() will look for, ignoring the event if it's not there
+		  The above listener will be bombared with events and must be able to quickly sort out non-bound 
+		  elems, which it does by looking for the BINDER_FLAG on it. This flag is set by getBinder(). 
+
+		  Also, to then handle the input the bind-instructions must first be parsed. 
+
+		  To make sure both of these^ things are done we call parseElem() every time a new input is focused 
+		  upon (an event that always preceeds 'input' events from that input). If it's not bound or has already
+		  been parsed then it's a quick, no-effect, operation...
 		*/
 		document.body.addEventListener('focusin',function parseElemOnFocus(event){parseElem(event.target)});
 
-		/*
+		/* 
+		  --INPUT LOSS--
 		  While inputting quickly on a slow system, the 'input' events caught here^ may be slow to make it
 		  all the way through the binder to .propogateToNodes() which could cause eg. the following scenario:
 			- user types 'a'
@@ -556,8 +575,8 @@ module.exports=function exportBinder(dep,proto){
 	*/
 	function binderInputEventHandler(event){
 		//Check that the input comes from a bound target, and that we're not currently ignoring said input
-		if(event.target[BINDER] && !event.target.hasAttribute('xxx-bind_ignore')){
-			let self=event.target[BINDER];
+		if(event.target[BINDER_FLAG] && !event.target.hasAttribute('xxx-bind_ignore')){
+			let self=event.target[BINDER_FLAG];
 
 			//Find the key that solves (elem.value == self[key]). Since this is an input and a user has
 			//actually changed it it's highly likely that we find one... but if we don't we log and exit
@@ -568,18 +587,17 @@ module.exports=function exportBinder(dep,proto){
 			}
 
 
-			//Get the value depending on...
+			//Get the value from the input depending on "type"
 			let value = (event.target.type == 'checkbox' ? event.target.checked : event.target.value)
 		
-			//...and update the value on every change. 
-			//my not be a good idea to bind textboxes where users write a whole novel...
+			//Then set the value on the underlying smarty
 			self.set(key,value,{target:event.target,src:'input'});
-			//NOTE: if the input changes rapidly/frequently and all intermittent values are NOT of interest
-			//      you can either: a) throttle the events being emitted by the input, and/or b) use the 
-			//      'throttle' or 'debounce' options of the underlying Smarty to afffect the 'change' events
-			//		comming from it and handled by dataEventCallback() here
+			//ProTip: if the input changes rapidly/frequently and all intermittent values are NOT of interest
+			//        you can either: a) throttle the events being emitted by the input, and/or b) use the 
+			//        'throttle' or 'debounce' options of the underlying Smarty to affect the events being emitted
+			//		  by it and handled by dataEventCallback() here
 
-			//Extra... Necessary?? Emit the input-event on the binder
+			//Extra... Necessary?? Emit the original input-event on the binder
 			self.emit('input',event);
 		}
 	}
@@ -591,8 +609,7 @@ module.exports=function exportBinder(dep,proto){
 	* @call(<Binder>)
 	*/
 	function dataEventCallback(event){
-		//This is the reason we don't call propogateToNodes directly, which can be called with a subset of
-		//all nodes related to the key (which is what forceUpdate() does)
+		//Get all nodes connected to the key
 		var nodes=getNodeArray.call(this,event.key);
 		
 		if(nodes.length){

@@ -232,7 +232,7 @@ module.exports=function exportNavigator(dep,proto){;
 			return;
 		}else{
 			this._log.info("Setting up navigator "+this._private.targetClass,this);
-			if(bu.checkType(['object','undefined'])=='object'){
+			if(bu.checkType(['object','undefined'],states)=='object'){
 				this._private.states=bu.objCreateFill(Object.keys(states),false);
 			}else{
 				this._private.states={};
@@ -377,7 +377,7 @@ module.exports=function exportNavigator(dep,proto){;
 			//Define method to read the current hash and navigate accordingly (storing it will
 			//allow us to remove it later if wanted)...
 			this._private.readAndFollowHash=()=>{
-				var ourHash=bu.queryStrToObj(window.location.hash)[this._private.hashKey];
+				var ourHash=bu.getHashKey(this._private.hashKey);
 				if(!ourHash){
 					this._log.trace("Hash changed but doesn't reference our navigator:",window.location.hash);
 				// }else if(this.sameState(ourHash)){
@@ -410,20 +410,7 @@ module.exports=function exportNavigator(dep,proto){;
 						//^ will be undefined if no keys are selected... remember to check for that vv
 					}
 					
-					//Parse the current hash in case it's being used for more than this navigator, update only
-					//our nav's part, then set back
-					var hashObj=bu.queryStrToObj(window.location.hash);
-					if(!keys || !keys.length){
-						delete hashObj[this._private.hashKey];
-					}else{
-						hashObj[this._private.hashKey]=keys;
-					}
-					var hashStr=bu.objToQueryStr(hashObj);
-					hashStr=hashStr?"#"+hashStr:hashStr; //not needed for setting, but needed for comp here vv
-					if(window.location.hash!=hashStr){
-						this._log.trace(`Updating uri hash: ${window.location.hash} => ${hashStr}`)
-						window.location.hash=hashStr;
-					}
+					bu.setHashKey(this._private.hashKey,((!keys || !keys.length)?undefined:keys));
 				}
 			});
 

@@ -82,9 +82,9 @@ module.exports=function exportRepeater(dep,proto){
 			* @prop boolean indexDependentPatterns 	Patterns can use the index of an item ('#'). If any do (either the
 			*										choice of template, or any of the template nodes) this flag needs  
 			*										to bet set true which will cause a 'change' event to fire anytime 
-			*										the order of the array is affected
-			. This implies that anytime you alter the order of the array 
-			*										(ie. anything other than adding/deleting the last item or merely 
+			*										the order of the array is affected. This implies that anytime you 
+			*										alter the order of the array (ie. anything other than adding/deleting 
+			*										the last item or merely 
 			*										changing items in place) you have to run a 'change' event for ALL
 			*										the affected indexes, which is slow, which is why we don't do it 
 			*										unless we have to.
@@ -124,38 +124,16 @@ module.exports=function exportRepeater(dep,proto){
 
 
 
-			//Create getter/setter for ._data
-			Object.defineProperty(this,'_data',{configurable:true
-				,get:()=>this._log.throwCode("ESEQ","repeater._data has not been set yet.") //throw until data gets set
-				,set:(data)=>{
-					//Make sure we have a SmartArray...
-					if(bu.checkType(['array','<SmartArray>'],data)=='array'){
-						//Create new smarty...
-						// this._log.note("Setting up new smarties.Array with options:",this._private.options);
-						var sArr=new dep.Smarties.Array(this._private.options);
-						
-						if(data){ //...and add all data to it
-							sArr.concat(data);
-							this._log.debug("Creating smartArray on repeater with data:",sArr)
-						}else{
-							this._log.note("Creating empty smartArray on repeater. Don't forget to populate it later!");
-						}
-					}else{
-						this._log.debug("Using passed in smartArray on repeater:",data);
-						sArr=data;
-					}
-
-					//...and reconfigure ._data with it, making it non-conf, non-write since _data is permanent for now
-					Object.defineProperty(this,'_data',{value:sArr});
-
-					return sArr;
-				}
-
-			})
-
 			//If data was passed set set _data to a smarty right away... but REMEMBER: this does NOT show() the data
 			if(data || options.defaultValues){
-				this._data=data||options.defaultValues; 
+				this.setData(data||options.defaultValues); 
+				
+			}else{
+				//Create getter/setter for ._data
+				Object.defineProperty(this,'_data',{configurable:true
+					,get:()=>this._log.throwCode("ESEQ","repeater._data has not been set yet.") //throw until data gets set
+					,set:data=>this.setData(data)
+				})
 			}
 
 		}catch(err){
@@ -203,6 +181,48 @@ module.exports=function exportRepeater(dep,proto){
 	*/
 	Repeater.prototype.hasData=function(){
 		return Object.getOwnPropertyDescriptor(this,'_data').get ? false : true; //the getter only exists BEFORE it's set...
+	}
+
+	/*
+	* Set data for this repeater to use
+	*
+	* NOTE: this can only be called once as it creates a non-configurable property
+	*
+	* @param <SmartArray>|array data
+	*
+	* @return <SmartArray> 			The passed in or created smarty
+	*/
+	Repeater.prototype.setData=function(data){
+
+		//Make sure we have a SmartArray...
+		if(bu.checkType(['array','<SmartArray>'],data)=='array'){
+			//Create new smarty...
+			// this._log.note("Setting up new smarties.Array with options:",this._private.options);
+			var sArr=new dep.Smarties.Array(this._private.options);
+			
+			if(data){ //...and add all data to it
+				sArr.concat(data);
+				this._log.debug("Creating smartArray on repeater with data:",sArr)
+			}else{
+				this._log.note("Creating empty smartArray on repeater. Don't forget to populate it later!");
+			}
+		}else{
+			this._log.debug("Using passed in smartArray on repeater:",data);
+			sArr=data;
+		}
+
+		//...and reconfigure ._data with it, making it non-conf, non-write since _data is permanent for now
+		try{
+			Object.defineProperty(this,'_data',{value:sArr});
+		}catch(err){
+			if(err instanceof TypeError && String(err).indexOf('Cannot redefine property')>-1){
+				this._log.throwCode("EALREADY","The data for this repeater has already been set:",this._data);
+			}else{
+				this._log.throwCode("BUGBUG",'Unexpected error while trying to set data on Repeater',err);
+			}
+		}
+
+		return sArr;
 	}
 
 	/*
@@ -265,7 +285,7 @@ module.exports=function exportRepeater(dep,proto){
 
 		//If we havn't set data yet, just set this
 		if(!this.hasData()){
-			this._data=arr;
+			this.setData(arr);
 			return []; //no values previously set...
 		}
 
@@ -328,7 +348,7 @@ module.exports=function exportRepeater(dep,proto){
 		//First we set the data
 		if(!this.hasData()){
 			//If we havn't set ._data yet, we do so now...
-			this._data=data||[]
+			this.setData(data||[]);
 		
 		}else if(data){
 			//...else if any new data was passed in, we replace whatever we had
