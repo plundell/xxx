@@ -27,8 +27,6 @@ module.exports=function exportNavigator(dep,proto){;
 	/*
 	* @param string targetClass
 	* @opt object options
-	* @opt object states 		Keys are keys, values are booleans (true==high)
-	*  ^NOTE: this will call .setup($states)
 	*
 	* @emit before(method, keys) 	The method that was called, and the keys it was called with
 	* @emit after(changed keys) 	An array of keys that actually changed state (check with navigator for current state of each key)
@@ -36,53 +34,51 @@ module.exports=function exportNavigator(dep,proto){;
 	*
 	* @extends BetterEvents
 	*/
-	function Navigator(targetClass, options={},states=null) {
-		
-		//Register this instance on Navigator._instances
-		proto.addInstance('Navigator',targetClass);
+	function Navigator(targetClass, options=undefined) {
+		//Call parent constructor. This will make sure the targetClass is unique, setup inheritence to BetterEvents,
+		//create this.log and this._private 
+		proto.XXX.call(this,'Navigator','xxx-nav',...Array.from(arguments));
 
-		proto.setupPrivateLogEvents.call(this,targetClass,options);
 
-		var o=this._private.options;
-
-		//Use the targetClass in certain cases when other options have not been given
-		o.highligthClass=o.highligthClass || targetClass+'_highlight';
-		this._private.hashKey=(typeof o.hashRouter=='string' ? o.hashRouter : targetClass);
-
-		this._private.targetClass=targetClass;
-
-		//Setup actions
+		//Register all default actions (devnote: called seperately because all classes may not wish to implement the same actions)
 		proto.setupActions.call(this,['show','hide','classif']);
 
-		this.registerActionHandler('highlight',(x)=>this.executeAction(x.node, {fn:'classif',args:[o.highligthClass]},{value:x.value}))
+
+
+		//Use the targetClass in certain cases when other options have not been given
+		this._private.options.highlightClass=this._private.options.highlightClass || targetClass+'_highlight';
+		this._private.hashKey=(typeof this._private.options.hashRouter=='string' ? this._private.options.hashRouter : targetClass);
+
+
+		this.registerActionHandler('highlight',
+			(x)=>this.executeAction(x.node, {fn:'classif',args:[this._private.options.highlightClass]},{value:x.value}),'silent')
 
 		
 		// This action is useful when setting the title of a wrapper which shows something (like a popup wrapper). 
-		// ProTip: If you use: xxx-nav-title="*" it won't get called each time you HIGH() gets called, but it will get called
-		// each time highOnly() gets called... like when switching between tabs/pages...
-		this.registerActionHandler('title',(x)=>Navigator.setText.call(this,Object.assign(x,{value:this.getHighKeys().join(',')})));
-
-		if(states)
-			this.setup(states);
+		this.registerActionHandler('title',(x)=>Navigator.setText.call(this,Object.assign(x,{value:this.getHighKeys().join(',')})),'silent');
+		  // ProTip: If you use: xxx-nav-title="*" it won't get called each time you HIGH(), but it will get called
+		  // each time highOnly() gets called... like when switching between tabs/pages...
 
 	} //end of constructor
-	Navigator.prototype=Object.create(dep.BetterEvents.prototype); 
-	Object.assign(Navigator.prototype,proto.prototype); //add common methods
-	Object.defineProperty(Navigator.prototype, 'constructor', {value: Navigator}); 
+	Navigator.prototype=Object.create(proto.XXX.prototype)
+	Object.defineProperty(Navigator.prototype, 'constructor', {value: Navigator});
+
 
 	
 	//Static class variables
 	Object.assign(Navigator,proto.static);
 	Object.defineProperties(Navigator,{
-		_baseAttr:{value:'xxx-nav'}
-		,_instances:{value:dep.BetterLog.BetterMap()}
+		_instances:{value:dep.BetterLog.BetterMap()}
 		,_defaultOptions:{value:{
 			showMultiple:false
 			,alwaysShowOne:true
-			,highligthClass:null //defaults to targetClass+'_highlight', see constructor
+			,highlightClass:null //defaults to targetClass+'_highlight', see constructor
 			,defaultHigh:null //default key to show
 			,hashRouter:false //if truthy the url hash will be updated and followed by this navigator. If a string is passed,
 							  //it will be used instead of the targetClass as the key in the hash querystring
+			,useOnclickAttr:null //If this nav is globally accessible you can set this to that path to use 'onclick' attribute instead of property
+			,asyncMode:false  //if true, calls to show/hide stuff will be async, allowing listeners to 'before' event to finish before proceeding
+			,breakOnHide:false //unlike repeater and binder, if a node is hidden here we keep processing rules
 		}}
 	});
 	
@@ -103,13 +99,12 @@ module.exports=function exportNavigator(dep,proto){;
 	Navigator.prototype.getNodes=function(key){
 		//Make sure it's setup before proceeding.
 		if(!this._private.states){
-			throw this._log.makeError("Navigator not setup yet, cannot interact with it");
+			throw this.log.makeError("Navigator not setup yet, cannot interact with it");
 		}
 
 		//Get all elements with valid instructions on the page (parses any new instructions, ignores previously
 		//parsed and failed)
-		var nodes=Array.prototype.slice.call(document.getElementsByClassName(this._private.targetClass))
-		nodes=nodes.filter(elem=>getNavInstructions.call(this,elem).length);
+		var nodes=this.nodes.toArray().filter(elem=>getNavInstructions.call(this,elem).length);
 
 																		
 		if(typeof key=='string')
@@ -228,10 +223,10 @@ module.exports=function exportNavigator(dep,proto){;
 	Navigator.prototype.setup=function(states){
 		//Start by setting the private flag. NOTE: that getNodes() relies on this ==true, else it'll throw
 		if(this._private.states){
-			this._log.warn("Already setup",this);
+			this.log.warn("Already setup",this);
 			return;
 		}else{
-			this._log.info("Setting up navigator "+this._private.targetClass,this);
+			this.log.info("Setting up navigator "+this.targetClass,this);
 			if(bu.checkType(['object','undefined'],states)=='object'){
 				this._private.states=bu.objCreateFill(Object.keys(states),false);
 			}else{
@@ -249,7 +244,20 @@ module.exports=function exportNavigator(dep,proto){;
 
 		var o=this._private.options;
 
-		//Now set the passed in or  default state on all nodes. This also parses the document for nodes		
+		//If we're using the onclick attribute, make sure this navigator is reachable
+		if(o.onclickAttr){
+			try{
+				bu.checkType('string',o.useOnclickAttr);
+				if(bu.nestedGet(window,o.useOnclickAttr.split('.'))!=this)
+					this.log.throwCode("EADDRESS","Could not access this navigator at "+o.useOnclickAttr)
+			}catch(err){
+				this.log.throwCode("EINVAL","Bad option useOnclickAttr.",err);
+			}
+		}
+
+
+		//Now set the passed in or default state on all nodes. This will change the view for the first time.     **MOVE**
+		//This will also parses the document for nodes
 		if(states){
 			this.highOnly(bu.groupKeysByValue(states)['true']);
 		}else if(o.defaultHigh){
@@ -257,7 +265,7 @@ module.exports=function exportNavigator(dep,proto){;
 
 		}else if(o.alwaysShowOne==true){
 			o.defaultHigh=this.getKeys()[0];
-			this._log.warn(`defaultHigh not set, but alwaysShowOne==true which forces us to use first `
+			this.log.warn(`defaultHigh not set, but alwaysShowOne==true which forces us to use first `
 				+`key found as default: ${o.defaultHigh}`);
 			this.highOnlyDefault();
 
@@ -265,9 +273,11 @@ module.exports=function exportNavigator(dep,proto){;
 			this.lowAll();
 		}
 
-		//If this nav is using hash... (NOTE: we've already done default^, so that's not included in hash)
+		//If this nav is using hash...                                                                            **MOVE**
 		if(o.hashRouter){
 			this.setupHashRouter();
+			//NOTE: This will immediately follow any hash set, ie. default^ may have moved us somewhere, and this may move us again
+			//NOTE2: Since we've already moved to default^, if we don't move again now, the hash won't display anything for the default location
 		}
 			
 
@@ -309,28 +319,24 @@ module.exports=function exportNavigator(dep,proto){;
 				//ad a onclick func that changes states on this Navigator (that in turn will trigger actions...)
 				if(inst.fn=='open' || inst.fn=='close'){
 					
-					//Combine $fn with optional args to get a method from this Nav...
-					var f=(inst.fn=='open'?'high':'low'),method;
+					//Determine which method we'll be calling...
+					var method=(inst.fn=='open'?'high':'low');
 					if(inst.key=='*'){
-						method=this[f+'All'].bind(this);
+						method+='All';
 					}else{
 						if(inst.args.includes('only')) //Remember, of .options.showMultiple==false, this has no effect
-							f+='Only'
+							method+='Only'
 						else
-							f=f.toUpperCase();
-						method=this[f].bind(this,inst.key);	
+							method=method.toUpperCase();
 					}
+					method+='_click'
 
-					//...then add the event
-					elem.onclick=()=>{
-						try{
-							//Tag the elem as 'used' (hads no effect by default, except 
-							//@see '.xxx-nav_link.xxx-nav_used'
-							elem.classList.add('xxx-nav_used');
-							method(); //args have already been bound ^
-						}catch(err){
-							this._log.error("BUGBUG: onclick failed. ",err);
-						}
+					//Then set it either on the elem's prop or attribute
+					if(this._private.options.useOnclickAttr){
+						elem.setAttribute('onclick',this._private.options.useOnclickAttr+'.'+method
+							+'(this'+(inst.key=='*'?'':`,"${inst.key}"`)+')');
+					}else{
+						elem.onclick=this[method].bind(this,elem,inst.key);
 					}
 
 					//Now return 'drop' since this shouldn't be treaded as an instruction by propogateToNodes().
@@ -364,28 +370,36 @@ module.exports=function exportNavigator(dep,proto){;
 	/*
 	* Tell this navigator to start updating and following the uri hash
 	*
+	* NOTE: This also reads the current hash and follows it
+	*
 	* @return void
 	*/
 	Navigator.prototype.setupHashRouter=function(){
 		if(this._private.followHash || this._private.setHash){
-			this._log.note("Hash routing already running on this Navigator");
+			this.log.note("Hash routing already running on this Navigator");
 			return;
 		}
-		this._log.info("Starting hash routing...");
+		this.log.info("Starting hash routing...");
 
 		try{
 			//Define method to read the current hash and navigate accordingly (storing it will
 			//allow us to remove it later if wanted)...
+			var lastSetHash; //used to prevent loops
 			this._private.readAndFollowHash=()=>{
+				if(window.location.hash===lastSetHash){
+					this.log.trace('We triggered this change ourselves, ignoring...');
+					return; //prevent responding to your own change
+				}
+
 				var ourHash=bu.getHashKey(this._private.hashKey);
 				if(!ourHash){
-					this._log.trace("Hash changed but doesn't reference our navigator:",window.location.hash);
+					this.log.trace("Hash changed but doesn't reference our navigator:",window.location.hash);
 				// }else if(this.sameState(ourHash)){
-				// 	this._log.trace("Hash changed, but we're already in right state:",ourHash);
+				// 	this.log.trace("Hash changed, but we're already in right state:",ourHash);
 				}else{
 					//We should only be here if we're not already showing the correct stuff, to 
 					//further avoid any loops
-					this._log.trace("Hash changed, following our part:",ourHash);
+					this.log.trace("Hash changed, following our part:",ourHash);
 					this.highOnly(ourHash);
 				}
 			}
@@ -409,13 +423,16 @@ module.exports=function exportNavigator(dep,proto){;
 						keys=keys[0];
 						//^ will be undefined if no keys are selected... remember to check for that vv
 					}
-					
-					bu.setHashKey(this._private.hashKey,((!keys || !keys.length)?undefined:keys));
+					if(!keys || !keys.length)
+						keys=undefined;
+
+					bu.setHashKey(this._private.hashKey,keys);
+					lastSetHash=window.location.hash;
 				}
 			});
 
 		}catch(err){
-			this._log.error("BUGBUG",err);
+			this.log.error("BUGBUG",err);
 			this.stopHashRouter();
 		}
 
@@ -436,7 +453,7 @@ module.exports=function exportNavigator(dep,proto){;
 				this.off(this._private.setHash);
 				wasRunning=true;
 			}catch(err){
-				this._log.error("BUGBUG",err);
+				this.log.error("BUGBUG",err);
 			}
 			delete this._private.setHash;
 		}
@@ -446,15 +463,15 @@ module.exports=function exportNavigator(dep,proto){;
 				window.removeEventListener("hashchange", this._private.readAndFollowHash);
 				wasRunning=true;
 			}catch(err){
-				this._log.error("BUGBUG",err);
+				this.log.error("BUGBUG",err);
 			}
 			delete this._private.readAndFollowHash;
 		}
 
 		if(wasRunning){
-			this._log.debug("Stopped hash routing on this Navigator");
+			this.log.debug("Stopped hash routing on this Navigator");
 		}else{
-			this._log.note("Hash routing isn't running on this Navigator, nothing to stop");
+			this.log.note("Hash routing isn't running on this Navigator, nothing to stop");
 		}
 
 		return;
@@ -490,15 +507,21 @@ module.exports=function exportNavigator(dep,proto){;
 	*
 	* @emit 'before' ($which, $keys)
 	*
-	* @return object 			copy of this._private.states (star included)
+	* @return object|Promise 			@see options.asyncMode. copy of this._private.states (star included)
 	* @call(this)
 	*/
-	function emitBefore(which,keys){
-		this._log.trace(which,keys);
-		this.emit('before',which,keys);
+	function beforeStateChange(which,keys){
+		bu.checkTypes(['string','array'],arguments);
+		this.log.makeEntry('info',which,keys.join(', ')).addOrigin().exec();
+		
 		var before=Object.assign({},this._private.states);
 		before['*']=this._private.states['*'];
-		return before;
+
+		var promise=this.emit('before',which,keys);                    
+		if(this._private.options.asyncMode)
+			return promise.then(before);
+		else
+			return before;
 
 	}
 
@@ -506,24 +529,29 @@ module.exports=function exportNavigator(dep,proto){;
 	/*
 	* Determine which states changes, then emit and return that array
 	*
-	* @param object before 	 	@see emitBefore
+	* @param object before 	 	@see beforeStateChange
 	*
 	* @emit 'after' (array) 	Emits with array of string keys, those who's state changed
 	*
-	* @return array[string] 	Array of keys that changed state (star included if changed). NOTE: To see what they changed
-	*							to you have to check with the navigator...
+	* @return array[string]|Promise 	@see options.asyncMode. Array of keys that changed state (star included if changed). 
+	*                                    	NOTE: To see what they changed to you have to check with the navigator...
 	* @call(this)
 	*/
-	function emitAfter(before){
+	function afterStateChange(before){
 		var changed=[],key;
 		for(key in this._private.states){
 			if(this._private.states[key]!=before[key]){
 				changed.push(key)
 			}
 		}
-		this.emit('after',changed);
-		return changed;
+		var promise=this.emit('after',changed);
+		if(this._private.options.asyncMode)
+			return promise.then(changed);
+		else
+			return changed;
+
 	}
+
 
 
 
@@ -563,19 +591,22 @@ module.exports=function exportNavigator(dep,proto){;
 		
 		//Make sure we have an array and that it doesn't include '*' which we handle manually
 		var keys=prepareKeyArray(keyOrKeys);
-		
-		var before=emitBefore.call(this,keys);
 
+		//To enable the optional asyncMode we wrap the following steps using runInSequence() 
+		var before;
+		return bu.runInSequence([
+			()=>{before=beforeStateChange.call(this,'HIGH',keys);} //returns promise in asyncMode
+			,()=>{
+				//Set all these keys to high, regardless what they were since new nodes may have been 
+				//introduced...
+				var groupedNodes=this.getNodesGroupedByKey();
+				keys.forEach(key=>propogateToNodes.call(this,key,true,groupedNodes[key]))
 
-		//Set all these keys to high, regardless what they were since new nodes may have been 
-		//introduced...
-		var groupedNodes=this.getNodesGroupedByKey();
-		keys.forEach(key=>propogateToNodes.call(this,key,true,groupedNodes[key]))
-
-		if(groupedNodes.hasOwnProperty('*') && !keys.includes('*')) //don't do again if keys already contained '*'
-			propogateToNodes.call(this,'*',true,groupedNodes['*']); //At least one is high, so set * to high
-
-		return emitAfter.call(this,before);
+				if(groupedNodes.hasOwnProperty('*') && !keys.includes('*')) //don't do again if keys already contained '*'
+					propogateToNodes.call(this,'*',true,groupedNodes['*']); //At least one is high, so set * to high
+			}
+			,()=>afterStateChange.call(this,before)
+		])
 
 	}
 
@@ -594,32 +625,36 @@ module.exports=function exportNavigator(dep,proto){;
 
 		//In case we're only allowed to high one...
 		if(this._private.options.showMultiple==false && keys.length>1){
-			this._log.throw(`Cannot set multiple keys to high (since option showMultiple==false). Got:`,keys);
+			this.log.throw(`Cannot set multiple keys to high (since option showMultiple==false). Got:`,keys);
 		}
+		
+		//To enable the optional asyncMode we wrap the following steps using runInSequence() 
+		var before;
+		return bu.runInSequence([
+			//emit and store the before-state
+			()=>{before=beforeStateChange.call(this,'highOnly',keys);} //returns promise in asyncMode
 
-		//Them emit and store the state
-		var before = emitBefore.call(this,'highOnly',keys);
+			,()=>{
+				//Regardless which states are what, we're going to make sure that ALL ELEMENTS get the right state
+				var key,groupedNodes=this.getNodesGroupedByKey();//also makes sure all nodes are parsed
+				for(key in groupedNodes){
+					if(key=='*')
+						continue; //we do this guy after, else it'll go to false now which may make something blink
 
-		//Regardless which states are what, we're going to make sure that ALL ELEMENTS get the right state
-		var key,groupedNodes=this.getNodesGroupedByKey();//also makes sure all nodes are parsed
-		for(key in groupedNodes){
-			if(key=='*')
-				continue; //we do this guy after, else it'll go to false now which may make something blink
+					//Determine if it should be high or not...
+					let setHigh=keys.includes(key);
+					//...then do it!
+					propogateToNodes.call(this,key,setHigh,groupedNodes[key]); //pass in nodes so we don't search again...
+				}
 
-			//Determine if it should be high or not...
-			let setHigh=keys.includes(key);
-			//...then do it!
-			propogateToNodes.call(this,key,setHigh,groupedNodes[key]); //pass in nodes so we don't search again...
-		}
+				if(groupedNodes.hasOwnProperty('*')) 
+					propogateToNodes.call(this,'*',true,groupedNodes['*']); //At least one is high, so set * to high
+			}
 
-		if(groupedNodes.hasOwnProperty('*')) 
-			propogateToNodes.call(this,'*',true,groupedNodes['*']); //At least one is high, so set * to high
-
-		//ProTip: It doesn't matter if not all the keys exist 'before' since their existence after is enough
-
-		//Now emit the changed keys (NOTE: this does not include any information about if any nodes actually
-		//changed or if there were any failure applying stuff)
-		return emitAfter.call(this,before);
+			//Now emit the changed keys (NOTE: this does not include any information about if any nodes actually
+			//changed or if there were any failure applying stuff)
+			,()=>afterStateChange.call(this,before)
+		]);
 	}
 
 
@@ -642,7 +677,7 @@ module.exports=function exportNavigator(dep,proto){;
 		if(this._private.options.defaultHigh)
 			return this.highOnly(this._private.options.defaultHigh);
 		else
-			this._log.throw("No default elem set");
+			this.log.throw("No default elem set");
 	}
 
 
@@ -670,20 +705,29 @@ module.exports=function exportNavigator(dep,proto){;
 			if(this._private.options.defaultHigh){
 				return this.highOnly(this._private.options.defaultHigh)
 			}else{
-				this._log.throw("Cannot LOW last element(s) with options alwaysShowOne==true && defaultHigh==null",changed);
+				this.log.throw("Cannot LOW last element(s) with options alwaysShowOne==true && defaultHigh==null",changed);
 			}
 		}
-		//Remove the star since we determine here if that gets LOW'd or not
-		var before=emitBefore.call(this,secret.includes('lowAll')?'lowAll':'LOW',keys); //secret arg... 
+
+		var which=secret.includes('lowAll')?'lowAll':'LOW';
 		
-		var groupedNodes=this.getNodesGroupedByKey();
-		keys.forEach(key=>propogateToNodes.call(this,key,false,groupedNodes[key]))
+		//To enable the optional asyncMode we wrap the following steps using runInSequence() 
+		var before;
+		return bu.runInSequence([
+			//emit and store the before-state
+			()=>{before=beforeStateChange.call(this,which,keys);} //returns promise in asyncMode
 
-		//Now if none are high after, also make star LOW (unless secret flag is set)
-		if(!highAfter.length && groupedNodes.hasOwnProperty('*') && !secret.includes('ignoreStar') )
-			propogateToNodes.call(this,'*',false,groupedNodes['*']);
+			,()=>{
+				var groupedNodes=this.getNodesGroupedByKey();
+				keys.forEach(key=>propogateToNodes.call(this,key,false,groupedNodes[key]))
 
-		return emitAfter.call(this,before);
+				//Now if none are high after, also make star LOW (unless secret flag is set)
+				if(!highAfter.length && groupedNodes.hasOwnProperty('*') && !secret.includes('ignoreStar') )
+					propogateToNodes.call(this,'*',false,groupedNodes['*']);
+			}
+			
+			,()=>afterStateChange.call(this,before)
+		]);
 	}
 
 
@@ -694,10 +738,25 @@ module.exports=function exportNavigator(dep,proto){;
 	*/
 	Navigator.prototype.lowAll=function(){
 		if(this._private.options.alwaysShowOne==true)
-			this._log.throw("LOWing all not permitted on this navigator, see option alwaysShowOne==true");
+			this.log.throw("LOWing all not permitted on this navigator, see option alwaysShowOne==true");
 		
 		let keys=this.getKeys();
 		return this.LOW(keys);
+	}
+
+
+	//Now add a few "click" methods that can be attached to elements
+	for(let method of ['HIGH','LOW','highAll','lowAll','highOnly','lowOnly']){
+		Navigator.prototype[method+'_click']=async function(elem,key){
+			try{
+				//Tag the elem as 'used' (hads no effect by default, except @see '.xxx-nav_link.xxx-nav_used')
+				elem.classList.add('xxx-nav_used');
+
+				await this[method](key);
+			}catch(err){
+				this.log.error("BUGBUG: onclick failed. ",err);
+			}
+		}
 	}
 
 
@@ -715,11 +774,6 @@ module.exports=function exportNavigator(dep,proto){;
 
 
 
-
-
-
-//TODO 2020-03-16: Something seems to double trigger... when switching tabs we seem to do the same thing 
-//					twice... check it out step by step...
 	/*
 	* Propogate the change to all elements bound to a specific key, keys or all nodes
 	*
@@ -734,27 +788,36 @@ module.exports=function exportNavigator(dep,proto){;
 	*/
 	function propogateToNodes(key,state,nodes){
 		try{
-			let a=this._private.states[key]==state ? ['Ensuring','is','trace'] : ['Setting','to','info'];
-			this._log[a[2]](`${a[0]} key '${key}' ${a[1]} ${state?'HIGH':'LOW'}. Nodes:`,nodes);
+			let a=this._private.states[key]==state ? ['Ensuring','is','trace'] : ['Setting','to','debug'];
+			this.log[a[2]](`${a[0]} key '${key}' ${a[1]} ${state?'HIGH':'LOW'}. Nodes:`,nodes);
 
-			var node,inst,failed=[],event={key, value:state}; 
-			for(node of nodes){
-				try{
-					var instructions=node.xxxNav[key]
-					if(!instructions || !instructions.length){
-						throw new Error("BUGBUG: Node doesn't have instructions but still got into propogateToNodes()");
-					}else{
+			var failed=[],event={key, value:state}; 
+			for(let node of nodes){
+				let instructions=node.xxxNav[key];
+				if(!instructions || !instructions.length){
+					this.log.error("BUGBUG: Node doesn't have instructions but still got into propogateToNodes()",node);
+				}else{
+					let len=instructions.length, i=0;
+					try{
 						//Now loop through that array and apply each inst
-						for(inst of instructions){
-							this.executeAction(node,inst,event);
+						for(i;i<len;i++){
+							this.executeAction(node,instructions[i],event);
+						}
+					}catch(err){
+						if(err=='break'){
+							if(len-1-i) // any left...
+								this.log.debug("Received 'break' signal. Skipping remaining instructions for node:"
+									,{ran:node.xxxRepeat.slice(0,i),skipped:node.xxxRepeat.slice(i)},node);
+
+						}else{
+							this.log.error('Unexpected error on instruction:',instructions[i],node,err)
+							failed.push(nodes);
 						}
 					}
-				}catch(err){
-					this._log.error('Failed to propogate to node:',{node,instructions},err)
-					failed.push(nodes);
 				}
 			}
 
+//TODO 2020-09-25: why does this work diff than binder/repeater?? why emit?
 			//If any failed, emit an error with them
 			if(failed.length)
 				this.emit('failed',key,state,failed);
@@ -767,7 +830,7 @@ module.exports=function exportNavigator(dep,proto){;
 			return;
 
 		}catch(err){
-			this._log.error("BUGBUG:",err,arguments)
+			this.log.error("BUGBUG:",err,arguments)
 		}
 	}
 

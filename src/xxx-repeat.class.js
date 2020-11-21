@@ -15,9 +15,16 @@
 * @depends smarties.Array
 * @exports {function} Call this function with the dependencies to get the Repeater constructor
 *
-* ProTip: If each clone is to contain mutiple pieces of data, then the value of the
-*		  smarties.Array should be used to set classes/data-bind attributes on children of
-*		  the clone for a seperate Binder to use
+* @protip *Nested binders* If each clone is to contain mutiple pieces of data, then the value of the
+*		   smarties.Array should be used to set classes/data-bind attributes on children of
+*		   the clone for a seperate Binder to use
+*
+* @emit new       Emitted when a <HTMLElement> is added, ie. when .show() is called it's emitted for every item of underlying smarty
+* @emit change
+* @emit delete    Emitted when a <HTMLElement> is removed, ie. when .hide() is called it's emitted for every item of underlying smarty
+* @emit move
+*
+* @listens update(i) 	Causes an item on the repeater to be re-drawn (ugly hack if changes are not automatically detected)
 *
 * DEPRECATED: If you see empty arrays / instructions it was the old way of preventing Repeater
 *			  from warning when you intentionally wanted no actions. The new way is to use
@@ -36,6 +43,8 @@
 *			index=4, value={foo:'bar'}, pattern='#$'	=>	"4{'foo':'bar'}"	*probably not what you want
 *			index=6, value={foo:'bar',me:{age:30}}, pattern='#-${me.age}${foo}#hat'
 *														=>	"6-15bar6hat"  
+*
+*
 */
 
 //Export
@@ -45,12 +54,14 @@ module.exports=function exportRepeater(dep,proto){
 	const Binder=proto.Binder
 	const bu=dep.BetterUtil
 
+	const devmode=ENV=='development';
 
-
-
-	const blackhole=document.implementation.createHTMLDocument('blackhole');
 
 	const TAG_RID='repeat-index-dependent';
+
+	
+
+
 
 	/*
 	* @param string             targetClass
@@ -63,20 +74,29 @@ module.exports=function exportRepeater(dep,proto){
 	*
 	* @extends BetterEvents	
 	*/
-	function Repeater(targetClass,options={},data=null){
+	function Repeater(targetClass,options=undefined){
 		try{
-			//Register this instance on Repeater._instances
-			proto.addInstance('Repeater',targetClass);
-			
-			proto.setupPrivateLogEvents.call(this,targetClass,options);
+			//Call parent constructor. This will make sure the targetClass is unique, setup inheritence to BetterEvents,
+			//create this.log and this._private 
+			proto.XXX.call(this,'Repeater','xxx-repeat',...Array.from(arguments));
 
-			
-			/*
-			* Create unique version of listener callback since we can share the underlying SmartArray but
-			* may wish to manipulate this Repeaters listening status seperately
-			*/
-			this._private.dataEventCallback=dataEventCallback.bind(this)
+			//Binder and Repeater differ from Navigator in that they use an underlying smart data source...
+			proto.prepareForData.call(this,dep.Smarties.Array);
 
+			//Register all default actions (devnote: called seperately because all classes may not wish to implement the same actions)
+			proto.setupActions.call(this);
+
+
+
+			this._private.onTemplateFail=bu.stringToNode(`<span class="${this.targetClass}" xxx-repeat-text="<repeat-error>$"></span>`);
+
+
+			//Getting out of sync with our data-smarty is bad, and the only real way to get back in sync is to
+			//re-populate... but we don't want to do it on every event since they may come in bursts, so the moment
+			//we sense something wrong we trigger a rebuild but we wait out any immediate events first...
+			this._private.rebuildTimeout=bu.betterTimeout(1000,this.repopulateTarget.bind(this), this.log);
+			this._private.rebuildTimeout.onError=(e)=>this.log.error("Could not recover from ESYNC",e);
+			 //This is triggered from dataEventCallback()
 
 			/*
 			* @prop boolean indexDependentPatterns 	Patterns can use the index of an item ('#'). If any do (either the
@@ -95,8 +115,8 @@ module.exports=function exportRepeater(dep,proto){
 				get:()=>indexDependentPatterns
 				,set:(str)=>{
 					if(!indexDependentPatterns){
-						if(str && this._private.options.debugMode){
-							this._log.warn("Possible slowdown! By using patterns with '#', every time you alter the "
+						if(str && devmode){
+							this.log.warn("Possible slowdown! By using patterns with '#', every time you alter the "
 								+"order of items (ie. by adding/deleting/moving items in the middle) a 'change' event "
 								+"will fire.");
 						}
@@ -108,221 +128,172 @@ module.exports=function exportRepeater(dep,proto){
 				}
 			})
 
-			/*
-			* @property actions 	Holds callbacks which are invoked by instructions on html nodes
-			*
-			* NOTE: Actions work differently in Binder and Repeater. In Repeater:
-			*   - Repeater WILL create/delete/move nodes
-			*	- Repeater is NOT an instance of a smarty, but has (can share) an underlying smarty
-			* 	- Repeater is connected to a specific target node (and replicates the smarty's children to that node)
-			*   - When underlying smarty emits 'event', _private.dataEventCallback() is called. It in turn moves/removes
-			*	   an item which doesn't require the action functions, OR it creates+calls action OR it calls action
-			*
-			* @access private
-			*/
-			proto.setupActions.call(this);
-
-
-
-			//If data was passed set set _data to a smarty right away... but REMEMBER: this does NOT show() the data
-			if(data || options.defaultValues){
-				this.setData(data||options.defaultValues); 
-				
-			}else{
-				//Create getter/setter for ._data
-				Object.defineProperty(this,'_data',{configurable:true
-					,get:()=>this._log.throwCode("ESEQ","repeater._data has not been set yet.") //throw until data gets set
-					,set:data=>this.setData(data)
-				})
-			}
 
 		}catch(err){
-			console.error(typeof err, err.constructor.name,err);
-			proto.getLog(this).throw('Failed to setup Repeater.',err,arguments);
+			proto.getLogAndOptions(this).log.throw('Failed to setup Repeater.',err,arguments);
 		}
 	}
-	Repeater.prototype=Object.create(dep.BetterEvents.prototype)
-	Object.assign(Repeater.prototype,proto.prototype); //add common methods
+	Repeater.prototype=Object.create(proto.XXX.prototype)
+	Object.assign(Repeater.prototype,proto.BinderRepeaterPrototype); //add common methods
 	Object.defineProperty(Repeater.prototype, 'constructor', {value: Repeater});
+
+
+
 
 	
 	//Static class variables
 	Object.assign(Repeater,proto.static);
 	Object.defineProperties(Repeater,{
-		_baseAttr:{value:'xxx-repeat'}
+		
+		//Attribute set on target to identify it as such, for debugging and for when repeaters are used within templates
+		_targetMark:{value:'repeater-target'}
+		
+		//Attribute set on each item in a target... not really used for anything except debug clarity
+		,_itemMark:{value:'repeater-item',configurable:true}
+		
 		,_instances:{value:dep.BetterLog.BetterMap()}
 		,_defaultOptions:{value:{
-			children:'complex'//used by smarties.Array created here
+			eventType:'local'//used by smarties.Array created here - ADDED 2020-09-08
 			,moveEvent:true //used by smarties.Array created here
 			,addGetters:true //used locally and by smarties.Array created here
 			,target:null
 			,template:`<span xxx-repeat='[{"value":"#"}]'></span>`
 			,debugMode:true //Attributes will be left/added to nodes for debug clarity
+			,cloneTemplateRepeaters:false //if true any repeaters in the templates will be cloned when the template is used
+			,groupChanges:0 //if >0 a delay will be added to the data and changes applied in bursts
+			,emptyPatternOK:false //if true applyPattern() will NEVER warn when it returns empty string||undefined 
+			,emptyDataOK:false //if true this.show() won't warn that this repeater contains no items
+			,breakOnHide:true //if a node is hidden, no other instructions are processed for that node
 		}}
 	});
 
 
 
-	Object.defineProperty(Repeater.prototype, 'length', {get: function(){
-		if(this._target && bu.varType(this._target)=='node')
-			return this._target.childElementCount;
+
+	/*
+	* Find all nested repeaters in a given element (can be any element in the DOM)
+	*
+	* @param <HTMLelement>  elem 
+	* @param bool 			onlySetup  	Default false. If true only child repeaters that have been setup are included
+	*
+	* @return array(<Node>,...) 	Array of nodes, each having a ._repeater property. The deepest one first
+	*/
+	Repeater.findNestedRepeaters=function(elem,onlySetup=false){
+		bu.checkType('node',elem)
+
+		var	nestedTargets=Array.from(elem.querySelectorAll(`[${Repeater._targetMark}]`));
+
+		if(nestedTargets.length && onlySetup)
+			return nestedTargets.filter(target=>node._repeater.isShowing());
 		else
+			return nestedTargets;
+	}
+
+
+	/*
+	* Hide all repeaters nested under a certain element
+	*
+	* @param <HTMLelement>  elem 
+	*
+	* @return array   An array of the repeaters we hid
+	*/
+	Repeater.hideNestedRepeaters=function(elem){
+		//First we need to find and hide any nested Repeaters. We want to hide the deepest one first...
+		var nodes=Repeater.findNestedRepeaters(elem,true); //true=>only get those showing...
+		if(nodes.length)
+			//Sort them by depth so we remove the deepest ones first
+			bu.sortByDepth(nodes).forEach(node=>node._repeater.hide());
+		
+		return nodes;
+	}
+
+
+
+
+
+
+
+	/*
+	* @get number    The *visible* number of children on this repeater
+	*                  >0  The repeater is currently showing with this many items
+	*                   0  No elements are showing, either because the data is empty or because the repeater is hidden with no 'empty template'
+	*		           -1  The 'empty template' is currently showing  
+	*/
+	Object.defineProperty(Repeater.prototype, 'length', {get: function(){
+		if(this.target && typeof this.target.childElementCount=='number'){
+			if(this.target.childElementCount==1 && this.target.children[0].hasAttribute('xxx-repeat_showonempty'))
+				return -1
+			else
+				return this.target.childElementCount; //can be zero
+		}else{
 			return 0;
+		}
 	}}); 
 
 
-
-
-
-
 	/*
-	* Check if this._data has been set without throwing a ESEQ
-	* @return bool 			
+	* Show the empty template if applicable
+	* @return boolean 	True if it was shown now, else false
+	* @call(<Repeater>)
 	*/
-	Repeater.prototype.hasData=function(){
-		return Object.getOwnPropertyDescriptor(this,'_data').get ? false : true; //the getter only exists BEFORE it's set...
-	}
-
-	/*
-	* Set data for this repeater to use
-	*
-	* NOTE: this can only be called once as it creates a non-configurable property
-	*
-	* @param <SmartArray>|array data
-	*
-	* @return <SmartArray> 			The passed in or created smarty
-	*/
-	Repeater.prototype.setData=function(data){
-
-		//Make sure we have a SmartArray...
-		if(bu.checkType(['array','<SmartArray>'],data)=='array'){
-			//Create new smarty...
-			// this._log.note("Setting up new smarties.Array with options:",this._private.options);
-			var sArr=new dep.Smarties.Array(this._private.options);
-			
-			if(data){ //...and add all data to it
-				sArr.concat(data);
-				this._log.debug("Creating smartArray on repeater with data:",sArr)
-			}else{
-				this._log.note("Creating empty smartArray on repeater. Don't forget to populate it later!");
-			}
-		}else{
-			this._log.debug("Using passed in smartArray on repeater:",data);
-			sArr=data;
-		}
-
-		//...and reconfigure ._data with it, making it non-conf, non-write since _data is permanent for now
-		try{
-			Object.defineProperty(this,'_data',{value:sArr});
-		}catch(err){
-			if(err instanceof TypeError && String(err).indexOf('Cannot redefine property')>-1){
-				this._log.throwCode("EALREADY","The data for this repeater has already been set:",this._data);
-			}else{
-				this._log.throwCode("BUGBUG",'Unexpected error while trying to set data on Repeater',err);
+	function showEmpty(){
+		if(this.target && this.length==0 && this.data.length==0){
+			for(let i=this.templates.childElementCount-1;i>-1;i--){
+				let temp=this.templates.children[i];
+				if(temp.hasAttribute('xxx-repeat_showonempty')){
+					let clone=temp.cloneNode(true)
+					this.log.debug("Showing 'empty node':",clone);
+					this.target.appendChild(clone); 
+					return;
+				}
 			}
 		}
-
-		return sArr;
 	}
 
 	/*
-	* Check if we've parsed for templates and have a valid target, ie. if this.prepare() has been called
-	* @return bool 			
+	* Hide the empty template if applicable
+	* @call(<Repeater>)
 	*/
-	Repeater.prototype.isPrepared=function(){
-		return this._target && this._target.ownerDocument==document
-	}
-
-	/*
-	* Check if Repeater is setup and showing data
-	*
-	* @throw <ble ESEQ> If this.hasData()==false
-	* @return bool 			
-	*/
-	Repeater.prototype.isShowing=function(){
-		//Check if the listener set by .show() is present on the data
-		return this._data.hasListener('event',this._private.dataEventCallback)
-	}
-
-
-
-	/*
-	* @return number 
-	*	0 - nothing setup, not even data
-	*   1 - data setup, but nothing prepared in DOM
-	*   2 - data setup and DOM prepared
-	*   3 - everything setup and data is showing in DOM 
-	*/
-	Repeater.prototype.status=function(){
-		if(!this.hasData())
-			return 0; //implies nothing is setup
-		
-		//The first time setup() is called this._templates is created, so if doesn't exist all 
-		//we have is the data but we're ready to go
-		if(!this.isPrepared())
-			return 1;
-
-		//You can call .setup() and destroy() to show/hide the repeater contents, so if we're still
-		//running we're either...
-		return this.isShowing() ? 3 : 2;
-	}
-
-
-
-
-
-
-	/*
-	* Replace all data in the underlying smarty. This method is "safer" then just calling .replace directly on
-	* the data since it tries to recover from failures (ie. delete everything and set a-new)
-	*
-	* @param array arr 	An array of new values to set
-	*
-	* @return array 	The previously set values
-	*/
-	Repeater.prototype.replace=function(arr){
-		bu.checkType(['array','<SmartArray>'],arr);
-
-		//If we havn't set data yet, just set this
-		if(!this.hasData()){
-			this.setData(arr);
-			return []; //no values previously set...
+	function hideEmpty(){
+		if(this.length==-1){
+			this.log.debug("Removing 'empty node'");
+			this.target.removeChild(this.target.children[0]);
 		}
-
-		//We expect a regular array here, NOT a SmartyArray... 
-		if(arr.isSmart){
-			this._log.warn("Expected a regular array but got a SmartArray. Will grab it's current values only.",arr)
-			arr=arr.values(); //NOTE: if the values are smarties themselves, these will remain smart
-		}
-
-		var oldValues=this._data.get();
-		try{
-			//Try replacing gracefully (ie. only apply changes...), but if anything goes wrong, stop trying right away
-			//since the most likely reason is that someone has gone in and inserted extra items in the target or otherwise
-			//just mucked about...
-			this._data.replace(arr,'panic'); //panic==stop right away
-		}catch(err){
-			//...instead just replace everything
-			this._log.warn("Regular delete->event->propogate failed. Manually emptying DOM target and data.",err);
-			
-			//Delete the rest of the data, forcefully if needed
-			this._data.empty('force') //force==delete everything, emitting 'delete' where possible but not stopping for anything 
-			                          //(will throw if all couldn't be deleted)
-
-			//Remove all remaining DOM items without emitting anything... obviously if we're not showing at the moment
-			//the target will be empty anyway...
-			emptyTarget.call(this);
-
-			//Fill the smarty with all the new items
-			this._data.concat(arr);
-		}
-		return oldValues;
 	}
 
 
-	Repeater.prototype.empty=function(){
-		return this.replace([]);
-	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -338,63 +309,89 @@ module.exports=function exportRepeater(dep,proto){
 	*
 	* NOTE: This method can be called multiple times if we call destroy() inbetween.
 	* NOTE2: Template is only parsed on first call to this method
+	* NOTE3: Unlike showData(), if data is already set and we pass new data here it will only replace the contents
+	*        of the existing <SmartArray>
 	*
-	* @param 
+	* @opt array data
 	*
 	* @return this
 	*/
 	Repeater.prototype.show=function(data){
 
-		//First we set the data
-		if(!this.hasData()){
-			//If we havn't set ._data yet, we do so now...
-			this.setData(data||[]);
+		//If we got new data that means we can't reuse any elements we've hidden...
+		if(data)
+			delete this._private.lastHide; 
 		
-		}else if(data){
-			//...else if any new data was passed in, we replace whatever we had
-			this.replace(data);
-		}
+		//Make sure we have a data source
+		proto.createReplaceOrVerifyDataExists.call(this,data);
+		 //^ see func body... throws if not in the right sequence
 
 
-		//Then we check if we're already showing (in which case ^^ will already have been propogated)
 		if(this.isShowing()){
-			this._log.debug("Repeater already showing...",this);
+			this.log.debug("Repeater already showing...",this);
 
 		}else{
-			//On first call to show() we parse/prepare the template. We do this after setting up data so we
-			//can check what kind of children, and thus what kind of instructions we expect (bad instructions 
-			//will be removed)
-			if(!this._templates){
-				Object.defineProperty(this,'_templates',{value:this.prepareTemplates()});
+			//On first call to show() we parse/prepare the template. 
+			if(!this.templates || !this.templates.childElementCount){
+				proto.prepareTemplates.call(this); //will use this._private.options.template, may set .options.target
+				  //^this throws if we don't get any valid templates
 			}
 
-			//On each call to show() make sure we have a live target in this document
-			if(!this._target || this._target.ownerDocument!=document){
-				let target=prepareTarget.call(this);
-				Object.defineProperty(this,'_target',{configurable:true,value:target});
-			}
+			//On each call to show() we fetch the target a-new... this in case the old target has been eg. hidden by
+			//a parent repeater and then re-created (ie. it'll be a new element)
+			prepareTarget.call(this); //will use this._private.options.target, which may come from ^
 		
 
-			//Start listening for changes and propogate them to the DOM...
-			this._data.on('event',this._private.dataEventCallback);
-				//NOTE: ^this listener is what determines if the repeater has been setup or not.
-
-			//...and just because, extend the log as well
-			this._private.extendedLog=this._log.extend(this._data._log);
+			//Start listening to the smarty so we can propogate changes to dom
+			proto.listenToData.call(this);
 			
+
 			//Finally poplate the target with any existing data, this will finally SHOW something
-			addAll.call(this);
-			if(this._data.length)
-				this._log.debug("Repeater is now showing ");
-			else
-				this._log.debug("Repeater IS now showing, there just aren't any items");
+			if(this._private.lastHide && this._private.lastHide.version==this.data._private.version){
+				this.log.info("Nothing changed in data since last hide, re-using those elements");
+				this.target.appendChild(this._private.lastHide.docfrag);
+
+				//TODO: do we need to re-show nested repeaters?
+			}else{
+				addAll.call(this);
+			}
+			  //DevNote: the following scenario will create "duplicate event" warnings in dataEventCallback:
+			  //   new smarty --> smarty.assign(data, not-silent) --> new repeater --> repeater.show(smarty)
+			  //because the creation, assignment and addAll will be sync, and then the async events from assign will
+			  //cause the same events to try and be added again... 
+
+
+			if(this.data.length){
+				this.log.debug("Repeater is now showing ");
+
+				//Emit new events for all items (also done in dataEventCallback)
+				for(let [key,value] of this.data.entries()){
+					this.emit('new',{src:'show',index:key,value,target:this.target.children[key]});
+				}
+			}else{
+				showEmpty.call(this);
+
+				//To help bring attention to possible bugs... we probably don't want to show an empty repeater
+				if(!this.length && !this._private.options.emptyDataOK){ //this.length will return -1 if showEmpty() showed stuff...
+					this.log.note("Showing EMPTY repeater:",this);
+					setTimeout(()=>{
+						if(this.isShowing() && !this.length){
+							this.log.warn("An empty repeater has been showing for 3 seconds now... is that intentional?",this);
+						}
+					},3000)
+				}else{
+					this.log.debug("Repeater IS now showing, there just aren't any items");
+				}
+			}
 		}
+
+		delete this._private.lastHide;
 
 		return this;
 	}
+
 	Repeater.prototype.setup=function(){
-		this._log.warn("DEPRECATED. Please use repeater.show() instead of repeater.setup()");
-		return this.show.apply(this,arguments);
+		this.log.throw("DEPRECATED. Please use repeater.show() instead of repeater.setup()");
 	}
 
 
@@ -405,34 +402,35 @@ module.exports=function exportRepeater(dep,proto){
 
 
 	/*
-	* The opposite of 'setup()', remove all items from the DOM (but keep the data/smarties.Array). This can be reversed 
-	* again with 'setup()'
+	* The opposite of 'show()', remove all items from the DOM (but keep the data/smarties.Array). This can be reversed 
+	* again with 'show()'
 	*
 	* @return this
 	*/
 	Repeater.prototype.hide=function(force=false){		
-		if(force||this.isSetup()){
-			this._log.debug(`Going to stop listening to private data and empty target of elements.`,this);
+		if(force||this.isShowing()){
+			this.log.debug(`Going to stop listening to private data and empty target of elements.`,this);
 
 			//Stop propogating changes to DOM
-			this._data.removeListener(this._private.dataEventCallback,'event');
+			proto.stopListeningToData.call(this);
 
-			//Stop listening to the smarties log
-			this._private.extendedLog=this._data._log.ignore(this._private.extendedLog); //sets it to undefined
+			//Remove any items from target and store them in case we show again before anything changes
+			this._private.lastHide={
+				version:this.data._private.version
+				,docfrag:emptyTarget.call(this)
+			};
+			 //NOTE this may remove more than our nodes if someone has put stuff in the target... that's a fail-safe so we can always continue
 
-			//Remove any items from target. NOTE this may remove more than our nodes if someone has put stuff in
-			//the target... that's a fail-safe so we can always continue
-			emptyTarget.call(this);
+			//Emit delete events for all items (also done in dataEventCallback)
+			for(let [key,value] of this.data.entries()){
+				this.emit('delete',{evt:'delete',src:'hide',index:key,value,target:this._private.lastHide.docfrag.children[key]});
+			}
 
 		}else{
-			this._log.warn("Repeater not setup, nothing to destroy",this);
+			this.log.trace("Repeater not showing, nothing to hide",this);
 		}
 
 		return this;
-	}
-	Repeater.prototype.destroy=function(){
-		this._log.warn("DEPRECATED. Please use repeater.hide() instead of repeater.destroy()");
-		return this.hide.apply(this,arguments);
 	}
 
 
@@ -448,47 +446,66 @@ module.exports=function exportRepeater(dep,proto){
 	*		gets a unique version of it that can be identified and removed when multiple Reapeaters share the
 	*		same underlying SmartArray
 	*
-	* @emit new(i,elem,data)
-	* @emit delete(i,oldElem,oldData)
-	* @emit change(i,elem,data,oldData)
-	* @emit move(elem,to,from) 	
+	* @emit new 			{src,evt,index,target,value}
+	* @emit delete 			{src,evt,index,target,value}  //old value and deleted elem
+	* @emit change          {src,evt,index,target,value}  //new value and new elem
 	*
 	* @return void
 	* @no-throw
 	* @bind(this)
 	*/
-	function dataEventCallback(event){
+	Repeater.dataEventCallback=function dataEventCallback(event){
 		// evt,i,value,old,oldIndex
 		try{
-
-			this._log.traceFunc(arguments);
+//TODO 2020-09-02: to minimize reflow, if opted, buffer events from smartarray and then try to apply them in blocks...
 
 	//TODO 2020-04-01: We're allowing complex values, but we can't handle nested keys here... so just
 	//					make sure we havn't got one
+	//TODO 2020-09-04: That probably means that we have to make sure the the smarty emits based on local change, or that
+	//					we here change the event...
+	//TODO 2020-09-15: Do we want to allow partial changes? OR do we only want to re-run actions for those keys that have changed?
 			if(isNaN(Number(event.key))){
-				this._log.error("BUGBUG: Repeaters can't handle nested keys, we're only interested in "
-					+"what happens with the local array");
+				this.log.error("BUGBUG: Repeaters can't handle nested keys, we're only interested in "
+					+"what happens with the local array",event);
 				return;
 			}
-
+			this.log.trace("Handling event:",event);
 				
-			var elem,indexesAffected
+			var elem,indexesAffected,rEvent={src:event.src||'data',index:event.key,evt:event.evt}
 
 			//The 'new' event is the only where elem doesn't need to exist, so do that first...
 			if(event.evt=='new'){
+				//Hide the 'empty node' if it's showing
+				hideEmpty.call(this);
+
+				//The following scenario would create duplicate items unless we stop it here:
+				//    new smarty --> smarty.assign(data, not-silent) --> new repeater --> repeater.show(smarty)
+				//because the creation, assignment and addAll will be sync, and then the async events from assign will
+			  	//cause the same events to try and be added again
+				if(this.length>=this.data.length)
+					this.log.makeError(`Got 'new' event for item #${event.key} but all items seem to already be showing.`
+						,this[event.key],event,this).addHandling("Preventing propogation").throw('ESYNC');
+
 				elem=insertItem.call(this,event)
-				
+
 				//Get effected range AFTER adding
 				let last=this.length-1;
 				if(this._private.indexDependentPatterns && event.key<last){
 					indexesAffected=bu.range(event.key+1,last);
 				}
 
+				if(elem.hasAttribute('autoclone-repeaters')){
+					//ProTip: If you only want a specific nested repeater to be automatically cloned you can leave options.cloneTemplateRepeaters=false
+					//        and instead set this attribute manually on a node
+					autoCloneRepeaters(elem);
+		//TODO 2020-10-01: wouldn't this have to be done every time we insertItem()?
+				}
+
 			}else{
-				elem=this._target.children[event.key]
+				elem=this.target.children[event.key]
 				//...for all the rest it must, so check
 				if(bu.varType(elem)!='node'){
-					this._log.error("Child #"+event.key+" does not exist, cannot propogate event: "+event.evt);
+					this.log.error("Child #"+event.key+" does not exist, cannot propogate event: "+event.evt);
 					return;
 				}
 
@@ -498,23 +515,37 @@ module.exports=function exportRepeater(dep,proto){
 
 						//We use the .indexDependentPatterns prop to make sure we're not checking unecessarily 
 						//where we KNOW patterns don't contain '#'
-						if(this._private.indexDependentPatterns!='i' && !elem._checkRightTemplate(value)){
-							gracefullyRemoveElement.call(this,elem);
-							elem=insertItem.call(this,event);
-							this._log.debug("Changed templates for elem #"+event.key,elem);
-						}else if(this._private.indexDependentPatterns!='t' && elem.hasAttribute(TAG_RID)){
-							propogateToNodes.call(this,elem,event,'onlyIndexPatterns')
+						if(this._private.indexDependentPatterns!='i' && !elem._keepSameTemplate(event)){
+							rEvent.evt='change';
+
+							elem=insertItem.call(this,event,'replace');
+							 //^elem is now the NEW item
+							this.log.debug(`Changed templates for elem #${event.key}. This is the new one:`,elem);
+
 						}else{
-							this._log.trace("Ignoring elem without index dependent pattern.",event,elem)
+							//This is not a repeater event...
+							rEvent=null;
+
+							if(this._private.indexDependentPatterns!='t' && elem.hasAttribute(TAG_RID)){
+								propogateToNodes.call(this,elem,event,'onlyIndexPatterns')
+							}else{
+								this.log.trace("Ignoring elem without index dependent pattern.",event,elem)
+							}
 						}
+						
 						break;
 
+					case 'update': 
+						//Not emitted natively by smarties. Can be manually emitted to force re-draw (useful when using getters 
+						//in patterns). Since nothing actually changed on the underlying data we set .value and .old to the same thing
+						event.value=event.old=this.get(event.key);
+						rEvent.evt='change';
+						//don't break
 					case 'change': 
-						if(!elem._checkRightTemplate(event.value)){
-							// this._target.removeChild(elem);		
-							gracefullyRemoveElement.call(this,elem);
-							elem=insertItem.call(this,event);
-							this._log.debug("Changed templates for elem #"+event.key,elem);
+						if(!elem._keepSameTemplate(event)){
+							elem=insertItem.call(this,event,'replace');
+							 //^elem is now the NEW item
+							this.log.debug("Changed templates for elem #"+event.key,elem);
 						}else{
 							propogateToNodes.call(this,elem,event)
 						}
@@ -522,7 +553,7 @@ module.exports=function exportRepeater(dep,proto){
 						break;
 
 					case 'delete':
-					 	this._log.debug('Removing repeater elem #'+event.key,elem);
+					 	this.log.debug('Removing repeater elem #'+event.key,elem);
 
 					 	//Get effected range BEFORE deleting
 					 	let last=this.length-1;
@@ -530,28 +561,39 @@ module.exports=function exportRepeater(dep,proto){
 					 		indexesAffected=bu.range(event.key,last);
 					 	}
 
-						// this._target.removeChild(elem);	
-						gracefullyRemoveElement.call(this,elem); //2019-05-23: Trying to solve issue when re-adding nested repeaters
+						// this.target.removeChild(elem);	
+						gracefullyRemoveElement.call(this,elem); 
 
 						if(this._private.options.addGetters){
 							//It just got one shorter, so remove the last getter
 							delete this[this.length];
 						}
+
+						//If that was the last element, show the 'empty node' if one exists
+						if(!last){
+							showEmpty.call(this);
+						}
+
 						break;
 
 					case 'move':
-						this._log.debug('Moving repeater elem #'+event.from+" to #"+event.to,elem);
+						this.log.debug('Moving repeater elem #'+event.from+" to #"+event.to,elem);
 						
 						if(this._private.indexDependentPatterns){
 							indexesAffected=[Math.min(event.from,event.to),Math.max(event.from,event.to)];
 						}
 
-						this._target.insertBefore(elem, this._target.children[event.to]);
+						this.target.insertBefore(elem, this.target.children[event.to]);
+
+						//Not a repeater event
+						rEvent=null;
+
+
 						break;
 
 
 					default:
-						this._log.note('Unhandled event: '+event.evt);
+						this.log.note('Unhandled event: '+event.evt);
 				}
 			}
 
@@ -564,13 +606,39 @@ module.exports=function exportRepeater(dep,proto){
 					//^be clear that the old value hasn't changed
 			}
 
-			//Kindof propogate the event from the underlying smarty...
-			event.target=elem
-			this.emit(event.evt,event);
+			//If we havn't deleted the event yet...
+			if(rEvent){
+				rEvent.target=elem;
+				this.emit(rEvent.evt,rEvent);
+			 	//NOTE: This is also done by .show() and .hide()
+			}
+
+
 			
 		
 		}catch(err){
-			this._log.error("BUGBUG",err,event);
+			if(err.code=='ESYNC'){
+				this.log.warn("Target out of sync, triggering re-build...",err);
+				this._private.rebuildTimeout.trigger();
+			}else
+				this.log.error("BUGBUG",err,event);
+		}
+	}
+
+
+
+	Repeater.prototype.triggerUpdate=function(which){
+		switch(bu.checkType('node','nodelist','array','number','undefined')){
+			case 'number':return this._private.dataEventCallback({evt:'update',key:which,src:'triggerUpdate'});
+			case 'undefined':return this.keys().forEach(key=>this.triggerUpdate(key));
+			default: 
+				//Since we need a key/value we have to group nodes according to which item they exist under...
+				var groupedNodes=this.groupNodesByKey(this.getNodesWithInstructions(which));
+				for(let i in groupedNodes){
+					let val=this.get(i);
+					propogateToNodes.call(this,groupedNodes[i],{evt:'update',key:i,value:val,old:val,src:'triggerUpdate'})
+				}
+				return;
 		}
 	}
 
@@ -590,135 +658,211 @@ module.exports=function exportRepeater(dep,proto){
 
 
 
+	/*
+	* Get all nodes with instructions for this instance or under a certain parent, based on if they have the targetClass set
+	*
+	* @opt <HTMLElement>|array[nodes...]|nodelist nodeOrNodes 	
+	*
+	* @return array[<HTMLElement>] 	If a single node was passed in it may be included
+	*/
+	Repeater.prototype.getNodesWithInstructions=function(nodeOrNodes){
+		nodeOrNodes=nodeOrNodes||this.target;
 
-
-
-
-
+		switch(bu.checkType(['node','nodelist','array'],nodeOrNodes)){
+			case 'array': 
+				nodeOrNodes=nodeOrNodes.filter(node=>bu.checkType('node',node,true));
+				//don't break
+			case 'nodelist': 
+				return Array.from(nodeOrNodes).filter(node=>node.classList.contains(this.targetClass));
+			case 'node': 
+				var nodes=Array.from(nodeOrNodes.getElementsByClassName(this.targetClass));
+				if(nodeOrNodes.classList.contains(this.targetClass)){
+					nodes.push(nodeOrNodes);
+				} 
+				return nodes;
+		}
+	}
 
 	/*
-	* Get all nodes with instructions for this instance, based on if they have the targetClass set
-	*
-	* @opt <HTMLElement> parent 	Only look for nodes in this parent. 
-	*
-	* @return array[<HTMLElement>] 	The $parent may be included
+	* @return object 	Keys match the keys of this, values are arrays of nodes
 	*/
-	Repeater.prototype.getNodesWithInstructions=function(parent){
-		parent=parent||this._target
-		bu.checkType('node',parent);
-
-		var nodes=Array.from(parent.getElementsByClassName(this._private.targetClass));
-		if(parent && parent.classList.contains(this._private.targetClass)){
-			nodes.push(parent);
-		} 
-		return nodes;
+	Repeater.prototype.groupNodesByKey=function(nodes){
+		var groups={},children=Array.from(this.target.children),c
+		for(let node of nodes){
+			if(typeof c!='number'||!bu.isDescendantOf(node,children[c])){
+				find:{
+					for(c in children){
+						if(bu.isDescendantOf(node,children[c]))
+							break find;
+					}
+					c=null;
+				}
+			}
+			if(typeof c=='number'){
+				groups[c]=groups[c]||[];
+				groups[c].push(node);
+				break;
+			}
+		}
+		return node;
 	}
 
 
+	/*
+	* Check if everything is setup and ready for insertion
+	*
+	* @throws <ble ESEQ> 	If we're not ready to insert
+	*
+	* @return void
+	*/
+	function readyToInsert(){
+		try{
+			bu.checkTypes(['node','<DocumentFragment>'],[this.target,this.templates])
+		}catch(err){			
+			this.log.throwCode("ESEQ","Trying to insert before this.templates and this.target have been set.",this);
+		}
 
+		if(!this.templates.childElementCount)
+			this.log.throwCode("ESEQ","this.templates is empty, will not be able to create new item",this);
+
+		//Since we're inserting new data that means our data array should be longer than the number or elements in our target,
+		//and if that is not the case we're out of sync
+		if(this.data.length<this.length)
+			this.log.throwCode('ESYNC',`There are ${this.length} elements in the target, but only ${this.data.length}`
+				+" items in the data array: the target is out of sync",{
+					target:this.target
+					,smarty:this.data
+					,snapshot:{//so we know what was going on when the error happened
+						children:Array.from(this.target.children) 
+						,data:this.data.copy()
+					}
+				});
+	//2020-09-02: removing this restriction... why would it half to be? 
+		// if(this.target.ownerDocument!=document)
+		// 	this.log.throwCode("EDOMCHANGED","The target is no longer part of this document:",this.target);
+
+
+	}
 
 
 	/*
 	* Add an item to the target
 	*
 	* @param object event
+	* @opt bool replace 	Default false. If true an existing item will be replaced => only 1 reflow
 	*
 	* @return node 		The newly created clone
 	* @call(this)
 	*/
-	function insertItem(event){
+	function insertItem(event,replace=false){
+		//Sanity check unless calling from...
+		if(event.src!='addAll'){
+			readyToInsert.call(this);
+			if(event.key<0||event.key>this.length)
+				this.log.throwCode("ERANGE",`Cannot insert item at index ${event.key} when length is ${this.length}`,this);
+		}
+
+
 		try{		
 			//Start by cloning and preparing a template
-			var clone=chooseAndCloneTemplate.call(this,event.key,event.value);
+			var clone=chooseAndCloneTemplate.call(this,event.key,event.value); //throws if no template is found
 			var childrenWithInstructions=prepareClone.call(this,clone);
-			let ble=this._log.makeEntry('debug',"Prepared new repeat item:")
-				.addHandling('Children with instructions:',childrenWithInstructions)
 
 			//Then fill the new clone with data
 			propogateToNodes.call(this,clone,event)
 			
-			ble.addHandling('Data:',event).exec();
+			this.log.makeEntry('debug',"Prepared new repeat item:",clone)
+				.addHandling('Children with instructions:',childrenWithInstructions)
+				.addHandling('Data:',event)
+				.exec();
 		}catch(err){
-			var clone=document.createElement('span');
-			this._log.error("Failed to get template. Substituting empty <span> to keep Repeater "
+			var clone=this._private.onTemplateFail.cloneNode(true);
+			this.log.error("Failed to get template. Substituting _private.onTemplateFail to keep Repeater "
 				+"in-sync with underlying data",err,clone,event);
 
-			clone._checkRightTemplate=function(){return false;} //never the right template, which forces the repeater to try again
+			clone._keepSameTemplate=function(){return false;} //never the right template, which forces the repeater to try again
 															//when data changes			
 		}
 
 		if(event.key==this.length){
-			this._target.appendChild(clone);
+			this.target.appendChild(clone);
 		}else{
-			this._target.insertBefore(clone, this._target.children[event.key]); //insert before the current child in that position
-		}
+			let current=this.target.children[event.key];
+			if(replace){
+				//To make the replacement with only 1 reflow we replaceChild() first and then hide any
+				this.target.replaceChild(clone,current);
+				Repeater.hideNestedRepeaters(current); //2020-09-15: doing it this order should work....
+			}else{
+				this.target.insertBefore(clone, current); //insert before the current child in that position
+			}
+		} 
 
-		if(this._private.options.addGetters){
+		if(this._private.options.addGetters && !replace){ //don't add getter if we just replaced
 			//Regardless where the item was inserted, the total length has increased, so add a public getter
-			let last=this._target.childElementCount-1
-				,self=this
-			;
-			Object.defineProperty(this,last,{
-				enumerable:true,configurable:true,get:function getRepeaterItem(){return self._target.children[last];}});
+			let last=this.length-1
+			Object.defineProperty(this,last,{enumerable:true,configurable:true,get:()=>this.target.children[last]});
 		}
 
 		
 		return clone;
 	}
 
+
+
+
+
+
+
 	/*
-	* The following scenario used to create a bug:
-	* 	Create repeater A
-	* 		Create repeater B inside
-	* 	Destroy repeater A
-	* 	Create repeater A
-	* 		Attempt to create repeater B --> fail
-	* 
-	* It may be because repeater B was not correctly destroyed, so this function checks if children are repeaters and 
-	* destroys them before destroying the parent
+	* Remove an element AFTER first checking for any nested repeaters and hiding those...
 	*
 	* @param element elem
-	* @return elem 			Same as passed in
+	*
+	* @return elemment  			Same as passed in
+	*
+	* @call(<Repeater>)
 	*/
 	function gracefullyRemoveElement(elem){
 
-		//First we need to find and destroy any nested Repeater. We want to destroy the deepest one first...
-		var nodes=this.findNestedRepeaters(elem,true); //true=>only get setup children
-		
-		if(nodes.length){		
-			this._log.debug(`Destroying ${nodes.length} nested repeaters before proceeding:`,nodes);
-			nodes.forEach(node=>node._repeater.destroy());
-			this._log.debug("Done destroying children, now removing this elem:",elem)
+		if(Repeater.hideNestedRepeaters(elem).length){
+			this.log.debug("Done hiding children, now removing this elem:",elem)
 		}else{
-			this._log.debug("No nested repeaters found, just removing this elem:",elem);
+			this.log.debug("No nested repeaters found, just removing this elem:",elem);
 		}
 
-		//Now we only have non-repeaters left. We may want to loop through them an delete each in turn in the
-		//same way, but for now we're trying just to remove them all
-		blackhole.adoptNode(elem);
-		return elem
+		return elem.parentNode.removeChild(elem);
 	}
+
+
 
 
 
 	/*
 	* Remove all items from target, even those not created by this repeater
 	*
-	* @return void
+	* @return <DocumentFragment>  containing all the removed items
+	*
 	* @call(<Repeater>)
 	*/
 	function emptyTarget(){
-		var total=this._target.childElementCount;
-		this._log.debug(`Emptying target of all ${total} elements:`,this._target);
+		
+		this.log.debug(`Emptying target of all ${this.length} elements:`,this.target);
 
-		if(this.length<total)
-			this._log.warn("Additional elements in target detected, these will be removed as well");
-
-		//Remove all children
-		while(this._target.childElementCount){
-			// this._target.removeChild(this._target.lastElementChild)
-			gracefullyRemoveElement.call(this,this._target.lastElementChild); //2019-05-23: Trying to solve issue when re-adding nested repeaters
+		//To minimize reflow we replace the target with an empty clone, remove all elements from the real one, 
+		//then reinsert it. This is however not necessary if we...
+		if(this.isShowing()&&this.length>1?true:false){ //... only have one child or if the we're not showing
+			var clone=this.target.cloneNode();
+			this.target.parentNode.replaceChild(this.target,clone);
 		}
+		
+		var removedItems=document.createDocumentFragment();
+		while(this.target.childElementCount){
+			removedItems.appendChild(gracefullyRemoveElement.call(this,this.target.firstElementChild));
+		}
+
+		//Revert if needed
+		if(clone)
+			clone.parentNode.replaceChild(clone,this.target);
 
 		//Remove all public getters
 		if(this._private.options.addGetters){
@@ -730,10 +874,12 @@ module.exports=function exportRepeater(dep,proto){
 						delete this[p];
 					}
 				}catch(err){
-					this._log.error("Problems while deleting public getters. Current prop: "+p,err,d);
+					this.log.error("Problems while deleting public getters. Current prop: "+p,err,d);
 				}
 			}
 		}
+
+		return removedItems;
 	}
 
 
@@ -747,22 +893,35 @@ module.exports=function exportRepeater(dep,proto){
 	* @call(<Repeater>)
 	*/
 	function addAll(){
-		if(this._target.childElementCount){
-			this._log.throw("Target is not empty, cannot add items since it may create duplicates",this._target);
+		if(this.target.childElementCount){
+			this.log.throw("Target is not empty, cannot add items since it may create duplicates",this.target);
 		}
 
-		if(this._data.length){
-			this._log.debug(`Going to add all ${this._data.length} items to target:`,this._target);
-			this._data.forEach((value,key)=>insertItem.call(this,{value,key,src:'addAll'}));
-			  //^since there was no 'event' we skip the key 'evt' and 'old'
+		if(this.data.length){
+			this.log.debug(`Going to add all ${this.data.length} items to target:`,this.target);
+			readyToInsert.call(this); //do one sanity check instead of letting it be done in every loop vv
+			
+			//In order to only get one reflow we temporarily set the target to document fragement, populate that, then move
+			//all the items into the real target in one swoop
+			var realTarget=this.target;
+			Object.defineProperty(this,'target',{configurable:true, value:document.createDocumentFragment()});
+			for(let i of this.data.keys()){
+				let value=this.data.get(i);
+				insertItem.call(this,{value,key:i,src:'addAll'})
+				  //^since there was no 'event' we skip the key 'evt' and 'old'
+			}
+			realTarget.appendChild(this.target);
+			Object.defineProperty(this,'target',{configurable:true, value:realTarget});
 		}
 
 		//And lastly as a sanity check we make sure both data and target have the same number of items
-		if(this.length!=this._data.length){
-			this._log.throw(`Something went wrong, there are ${this._data.length} data items, but ${this.length} DOM items`
-				,this._target, this._data);
+		if(this.length!=this.data.length){
+			this.log.throw(`Something went wrong, there are ${this.data.length} data items, but ${this.length} DOM items`
+				,{target:this.target, data:this.data});
+		}else if(this.data.length){
+			this.log.trace(`All ${this.data.length} items added`);
 		}else{
-			this._log.trace("All items added");
+			this.log.trace(`There are no items in the SmartArray, so no DOM items to add`);
 		}
 
 		return;
@@ -794,257 +953,148 @@ module.exports=function exportRepeater(dep,proto){
 
 
 
-
-
-
-
-
-
-
-
 	/*
-	* Find all nested repeaters in a given element (can be any element in the DOM)
-	*
-	* @param <HTMLelement>  elem 
-	* @param bool 			onlySetup  	Default false. If true only child repeaters that have been setup are counted
-	*
-	* @return array(<Node>,...) 	Array of nodes, each having a ._repeater property. The deepest one first
-	*/
-	Repeater.prototype.findNestedRepeaters=function(elem,onlySetup=false){
-		bu.checkType('node',elem)
-
-		var	nodes=Array.from(elem.querySelectorAll('[repeater-target]'));
-
-		if(nodes.length){
-			//We want to return an array organized by depth (so eg. gracefullyRemoveElement() can remove them 
-			//in the right order), so start by grouping them by such....
-			var byDepth={},c=0;
-			nodes.forEach(node=>{
-				//Optionally check if setup...
-				if(onlySetup && !node._repeater.isSetup()){
-					return;
-				}
-				c++;
-				let d=bu.countParentNodes(node);
-				if(byDepth.hasOwnProperty(d))
-					byDepth[d].push(node);
-				else
-					byDepth[d]=Array(node);
-			})
-
-			//...then flatten into an array
-			nodes=[];
-			var keys=Object.keys(byDepth).sort().reverse().forEach(key=>{
-				nodes.push.apply(nodes,byDepth[key])
-			})
-		}
-
-		return nodes;
-	}
-
-	Repeater.prototype.countNestedItems=function(onlySetup=false){
-		var l=this.length,count=0;
-		for(var i=0;i<l;i++){
-			this.findNestedRepeaters(this[i],onlySetup).forEach(child=>count+=child.length);
-		}
-		return count;
-	}
-
-
-
-
-
-
-
-	/*
-	* Prepare target (ie. where copies of the template will be inserted)
+	* Prepare the live target element (ie. where copies of the template will be inserted)
 	*
 	* NOTE: This method removes the template if it exists inside the target
 	* 
-	* @return <HTMLElement> 	The live target element
+	* @throws TypeError         Refers to options.target or .template
+	* @throws ENOTFOUND         Refers to options.target or .template, if it's an id that doesn't exist
+	* @throws EINVAL            If target is not part of this document or .target/.template not specified
+	* @throws ENOTEMPTY         If the target is not empty
+	*
+	* @return void
+	* @set this.target <HTMLElement>     The live target element
 	*
 	* @call(this)
 	*/
 	function prepareTarget(){
-		this._log.traceFunc(arguments);
-		try{
-			var target,template;
+		this.log.traceFunc(arguments);
 
-			if(this._private.options.target){
-				//If a specific target was specified in options, that takes presidence
-				target = bu.getLiveElement(this._private.options.target,true); //true==return null if none found
-				if(!target)
-					throw this._log.makeError("Bad target (arg#2)",this._private.options.target);
-				else
-					this._log.debug("Using explicit target:",this._private.options.target)
-			}else{
-				//...else use the parent of the template
-				try{
-					template=bu.getLiveElement(this._private.options.template,false);//false==throw on not found
-					target = template.parentNode 
-					this._log.debug("Using templates' parent as target:",target)		
-				}catch(err){
-					this._log.debug("No explicit target specified, trying templates' parent");
-					throw err;
-				}
-			}
-
-			//Now make sure it's valid...
-			if(target.ownerDocument!=document)
-				this._log.throw("The target is not part of this document:",target);
-
-			//Remove the template if it was inside the target
-			let c=target.childElementCount;
-			if(c>0){
-				if(c>1||target.firstElementChild!=template)
-					this._log.throw("Repeater targets must be empty.",{target,'liveTemplate':template,
-					  'template':this._private.options.template,'Repeater':this});
-				target.removeChild(template);
-			}
-			
-			//...finally mark it with a flag which we use when checking for nested repeaters (and for debug clarity)
-			target.setAttribute('repeater-target',this._private.targetClass);
-			target._repeater=this;
-
-			//...aaand set a ref on the node to this repeater (debug clarity only?)
-			
-
-			return target;
-
-		}catch(err){
-			this._log.throw("Failed to get target.",err);
+		//NOTE: we've set .target in prepareTemplates() if applicable
+		if(this._private.options.target){
+			var target = bu.getLiveElement(this._private.options.target); //throws TypeError or ENOTFOUND
+		}else{
+			this.log.throwCode("EINVAL","Bad options: no target specified and template didn't have a parent.",this._private.options);
 		}
+
+		//If we have a target from before, check if they're the same
+		if(this.target==target){
+			this.log.trace("The target hasn't changed:",target);
+
+		}else{
+
+			let args={new:target};if(this._private.options.target!=target){args.identifier=this._private.options.target};
+			if(this.target){
+				args.old=this.target;
+				this.log.note("Switching to new target:",args);
+			}else{
+				this.log.debug("Using target:",...Object.values(args));
+			}
+
+			if(target.ownerDocument!=document)
+				this.log.note("The target is not part of this document:",target);
+			//2020-09-22: the ownerDocument doesn't change when inserting/removing, only when adopting. even nodes in doc-frags are part of this document
+
+			//If the templates are inside the target, time to get rid of them...
+			if(target.firstElementChild && target.firstElementChild.content==this.templates)
+				target.removeChild(target.firstElementChild); 
+				 //^NOTE: we remove the entire <template> tag, not just the DocumentFragment containing the templates
+			
+			//Everything is good! Mark it with a flag which we use when checking for nested repeaters (and for debug clarity)
+			target.setAttribute(Repeater._targetMark,this.targetClass);
+			
+			//...aaand set a ref on the node to this repeater
+			target._repeater=this;
+			Object.defineProperty(this,'target',{enumerable:true,configurable:true,value:target});
+		}
+		
+		//Finally make sure the target is empty
+		if(target.childElementCount>0)
+			this.log.throwCode("ENOTEMPTY","Repeater targets must be empty.",target);
+		
+		return;
 	}
 
 
 
 
 
+
+
+		
+
+
+
+
+
+
 	/*
-	* Prepare all elements in a template(s) so it can be quickly copied and values inserted into it.
+	* Count how many nested repeaters exist within this repeaters target. Can be good if you want to 
+	* limit how many repeaters are being created...
 	*
-	* NOTE: This method should be run AFTER setupData() so we know what kind of pattern to expect
-	* NOTE2: This method can't prepare everything since we're cloning, so also see prepareClone()
+	* @opt bool onlyCountSetup      Default false. Only count those that are setup (which may not mean that they are
+	*								actually showing since some parent may be hidden
 	*
-	* @return array 		Array of templates (cloned nodes)
+	* @return number
 	*/
-	Repeater.prototype.prepareTemplates = function(){
-		var template=bu.getLiveElement(this._private.options.template); //gets html node from node|id|htmlstring
-		
-		//Since multiple repeaters may be using the same template, we need our own copy, so clone it (or possibly them, see vv)
-		var clones;
-		if(template.tagName=='TEMPLATE'){
-			//The <template> tag is a DocumentFragment, which means we have to get it's children which are the actual 
-			//templates... children-->plural, which means there could be multiple templates...
-			// clones=Array.from(template.content.children,child=>child.cloneNode(true));
-			clones=Array.from(template.content.children,child=>document.importNode(child,true));//2019-02-08: adopt just in case...
+	Repeater.prototype.countNestedItems=function(onlyCountSetup=false){
+		if(!this.length || !this.target)
+			return 0;
+		return Repeater.findNestedRepeaters(this.target,onlyCountSetup).length;
+	}
 
-		}else{
-			// clones=[template.cloneNode(true)];
-			clones=[document.importNode(template,true)]; //2019-02-08: true=>adopt...just in case...
-		}
 
-		
-		//If we have multiple templates, we have to make sure they have ${'xxx-repeat'}-if attributes, since we'll 
-		//only be inserting a single template for each item in the underlying smarties.Array. So any that are missing 
-		//this attr, delete
-		if(clones.length>1){
-			for(var i=clones.length-1;i>-1;i--){
-				let c=clones[i];
 
-				if(!c.hasAttribute('xxx-repeat_usedefault')){
-					let attr='xxx-repeat_useif'
-					if(!c.hasAttribute(attr)){
-						this._log.warn(`Removing one of multiple templates because it's missing useif/usedefault attributes:`,c); 
-						clones.splice(i,1);
-						continue;
-					}else{
-						try{
-							var rule=c.getAttribute(attr);
-							rule=bu.tryJsonParse(rule, true) || [rule]; 
-					
-							if(rule.length==1){
-								//if a single value was given ^, then it was the criteria, so we add pattern and operator
-								rule.unshift('$','==');
-							// }else if(c.getAttribute(rule[0]).includes('#')){  //2020-05-19: <-- that's just wrong, right?
-							}else if(rule[0].includes('#')){
-								this._private.indexDependentPatterns='t';  
+	/*
+	* Sometimes a template can contain a live repeater, eg. a table row with a dropdown who's items are dynamic. For
+	* each new row of the table we have to clone the repeater keeping the dropdown up to date, ie. every dropdown on 
+	* every row gets it's own repeater which uses the same data source as that in the template
+	*
+	* @param <HTMLElement> item 	A newly created item on this repeater 
+	*
+	* @call(<Repeater>)
+	*/
+	function autoCloneRepeaters(item){
+		//First get a list of the repeaters we're cloning...
+		var clsList=item.readAttribute('autoclone-repeaters').split(',');
 
-	//TODO: keep seperate track if template-choice is '#'
-								this._log.warn("Slow template chooser:",rule);
-							}
+		//Then start looping...
+		for(let target of Repeater.findNestedRepeaters(item)){
+			try{
+				//Any repeaters we're not cloning...
+				if(!clsList.includes(target.getAttribute(Repeater._targetMark)))
+					continue;
 
-							//now re-save the full rule
-							c.setAttribute(attr,JSON.stringify(rule));
+				//The rest should definately not have a ._repeater set on them... but if $item was not newly created...
+				if(target._repeater)
+					this.log.throwCode('EEXISTS',"BUGBUG: trying to clone a nested repeater, but someone has already"
+						+" set this one on it:",target._repeater);
 
-						}catch(err){
-							this._log.error(`Removing bad template:`,c,rule,err); 
-							clones.splice(i,1);
-							continue;
-						}
-					}
+				//Create a new repeater based on the old repeater
+				let oldClass=target.getAttribute(Repeater._targetMark)
+					,oldRepeater=Repeater._instances[oldClass]
+					,newClass=Repeater.getUniqueTargetClass(oldClass) 
+	 //TODO 2020-09-22: For stuff that hides/shows a lot we should try to keep repeaters... but how do we know that the same repeater is being created
+	 //                 since these classes are not unique... maybe it's best to simply move items into a doc-frag when hiding, different from .destroy
+					,newRepeater=new Repeater(newClass,oldRepeater._private.options,oldRepeater.data)
+				;
+
+				//Then change all the class names in the target and set said target on the new one
+				for(let nodeWithInst of target.getElementsByClassName(oldClass)){
+					nodeWithInst.classList.replace(oldClass,newClass)
 				}
+				newRepeater._private.options.target=target;
+				 //^by setting this we ensure that the template will be cloned into the new repeater
+
+				//Finally we show it!
+				newRepeater.show();
+
+
+			}catch(err){
+				self._log.error(err);
 			}
 		}
-
-		if(clones.length>1){	
-			this._log.info(`Multiple templates (${clones.length}) found:`,clones);
-		}else{
-			this._log.debug('Single template found:',clones[0]);
-		}
-		
-		//Now we want to do as much preparation as possible, so we don't have to do it each 
-		//time in createItem(). So loop through all templates...
-		clones.forEach((clone,i)=>{
-			//...and all nodes in each template
-			var allElems=Array.from(clone.getElementsByTagName("*"));
-			allElems.push(clone); //include the clone itself
-			var t=0
-			allElems.forEach(elem=>{
-				try{
-					//We need to remove ids, but for debug purposes we'd like to still be able to 
-					//see them, so move them to another attribute
-					if(elem.hasAttribute('id')){
-						elem.setAttribute('_id',elem.getAttribute('id'));
-						elem.removeAttribute('id');
-					}
-
-					//Now look for any instructions
-					var instructions=getRepeatInstructions.call(this,elem);
-
-					//Unlike Binder, Repeater clones nodes, which removes any props set on the live node,
-					//which implies that we have to store the instructions as string attributes for now
-					//and JSON.parse() them to live in prepareClone(). And for future dev.ref: we can't
-					//convert them to live here and them copy them to the clone because we clone the entire
-					//template, not each child individually... just think about it...
-					if(instructions){
-						elem.setAttribute('xxxRepeat',JSON.stringify(instructions)); 
-						t+=instructions.length
-
-						//If any instructions include '#', mark the entire clone/template
-						if(!clone.hasAttribute(TAG_RID) && instructions.find(inst=>inst.pattern.includes('#'))){
-							clone.setAttribute(TAG_RID,'');
-						}
-					}
-
-
-				}catch(err){
-					this._log.error("Failed to prepare template node.",err,elem);
-				}
-			});
-			//Unlike Binder/Nav, here we have templates with multiple children, any of which may have instructions
-			//(but usually not all of them). So we send noWarn in getRepeatInstructions(), and now if none of them
-			//had any instructions we warn here
-			let msg=`Prepared template ${i+1} of ${clones.length},`, attr=Repeater._baseAttr+'_noaction';
-			if(t || clone.hasAttribute(attr))
-				this._log.debug(`${msg} it has ${t} instructions`);
-			else
-				this._log.warn(`${msg} but it has no instructions! (if intentional please add attribute '${attr}'`)
-
-		})
-
-
-		return clones;
 	}
 
 
@@ -1058,34 +1108,44 @@ module.exports=function exportRepeater(dep,proto){
 	* @call(<Repeater>)
 	*/
 	function prepareClone(clone){
+		bu.checkType('node',clone);
 		document.adoptNode(clone); //2019-05-23: Trying to solve issue with not being able to find by id... //2020-02-10: ???
 		
 		//Set a few shortcuts and a flag on the clone to help out... _repeatIndex eg. is used by chooseAndCloneTemplate()
-		clone.setAttribute('repeater-item',this._private.targetClass); 
+		clone.setAttribute(Repeater._itemMark,this.targetClass); 
 		Object.defineProperties(clone,{
 			_repeater:{enumerable:true,get:()=>this}
 			,_repeatIndex:{enumerable:true,get:()=>Array.from(clone.parentElement.children).indexOf(clone)}
-			,_repeatData:{enumerable:true,get:()=>this._data.get(clone._repeatIndex)}
+			,_repeatData:{enumerable:true,get:()=>this.data.get(clone._repeatIndex)}
 		})
 
 		
 		//Turn all pre-parsed instructions into live objects
 		let nodes=this.getNodesWithInstructions(clone)
-		nodes.forEach(getRepeatInstructions.bind(this));
+		nodes.forEach(node=>{
+			Repeater.getInstructions.call(this,node);
+
+			//The attr has now served it's purpose, the only reason to keep it is debugging
+			if(!devmode)
+				node.removeAttribute('xxxRepeat');
+		});
 
 		return nodes;
 	}
 
 
 	/*
-	* Get instructions from an element
+	* Get instructions from an element. 
+	*
+	* NOTE: This method can be called both when preparing templates and later when preparing a clone 
+	* NOTE: This is where elems with instructions are given the targetClass
 	*
 	* @param <HTMLElement> elem
 	*
 	* @return array|undefined 		An array of objects if instructions exist, else undefined
 	* @call(<Repeater>)
 	*/
-	function getRepeatInstructions(elem){
+	Repeater.getInstructions=function getRepeatInstructions(elem){
 		//If no live object exists on the elem...
 		if(!elem.hasOwnProperty('xxxRepeat')){
 			//...and no attribute either...
@@ -1093,29 +1153,39 @@ module.exports=function exportRepeater(dep,proto){
 				//...then look for and parse new instructions, saving it to the prop we checked first ^^
 				let instructions=proto.getInstructions.call(this
 					,elem
-					,validateInstruction.bind(this) //callback used to determine we have a good pattern, throw => don't include
-					,this._private.options.debugMode?'extract':''
+					,validateInstruction.bind(this,elem) //callback used to determine we have a good pattern, throw => don't include
+					,devmode?'extract':''
 					,'emptyOK' //don't warn if individual elems don't have instructions, see prepareTemplates() for details
 					,'keyIsPattern' //you can write instructions .key or .pattern and they will mean the same thing
 				);
-
+				
 				//If we found any, save them, else at least make sure the prop exists so the the prop we checked first^...
-				elem.xxxRepeat=(instructions.length ? instructions : null)
+				if(instructions.length){
+					elem.xxxRepeat=instructions;
+
+					//If any instructions include '#', mark the entire clone/template so we can 
+					//quickly identify it in dataEventCallback()
+					if(!elem.hasAttribute(TAG_RID) && instructions.find(inst=>inst.pattern.includes('#'))){
+						elem.setAttribute(TAG_RID,'');
+					}
+				}else{
+
+					delete elem.xxxRepeat
+				}
 
 			//If it does have the attribute (which will be the case with every new clone)...
 			}else{
 				//...just make it live and save it to the prop we checked first ^^...
 				elem.xxxRepeat=bu.getJsonAttr(elem,'xxxRepeat');
-
-				//The attr has now served it's purpose, the only reason to keep it is debugging
-				if(!this._private.options.debugMode)
-					elem.removeAttribute('xxxRepeat');
 			}
+			//REMEMBER: We can't remove the xxxRepeat attribute here, because this method is used on templates too, and like
+			//          notes state there we have to keep it until a clone has been made...
+
 
 			//If we found any instructions...
 			if(elem.xxxRepeat){
 				//...set this Repeater's targetClass on the elem to mark that it's got instructions
-				elem.classList.add(this._private.targetClass); 
+				elem.classList.add(this.targetClass); 
 
 				//ProTip: If you need to change the instructions on a single element you should delete both prop and 
 				//		  attr "xxxRepeat", but leave this class/flag. That way the next time propogateToNodes() is 
@@ -1133,6 +1203,7 @@ module.exports=function exportRepeater(dep,proto){
 	/*
 	* Check that an instruction is valid for a Repeater. This mostly deals with the pattern...
 	*
+	* @param <HTMLElement> elem 		For logging purposes only
 	* @param object inst  				Instructions found on a node, parsed into a live object
 	*  @prop string|array key|pattern 	Arrays will be converted: ["person","age"] => "${person.age}"
 	*
@@ -1143,9 +1214,9 @@ module.exports=function exportRepeater(dep,proto){
 	*
 	* @call(this) 		
 	*/
-	function validateInstruction(inst){
+	function validateInstruction(elem,inst){
 
-		//For Repeater the key is a pattern, so rename it
+		//Most of the time for repeaters the key is a pattern, so rename it
 		inst.pattern=inst.pattern||inst.key
 		delete inst.key;
 
@@ -1155,23 +1226,22 @@ module.exports=function exportRepeater(dep,proto){
 				if(inst.pattern.includes('#')){
 					//This will slow things down if we re-order the array often
 					this._private.indexDependentPatterns='i';
-					this._log.warn("Slow instruction:",inst);
-				}else if(!inst.pattern.includes('$')){
-					//If there is no special character we assume it's the name of a single prop
-					inst.pattern='${'+inst.pattern+'}';
+					this.log.warn("Index-dependent patterns are slow and may be a problem if we re-order the array often:",inst,elem);
+				}else if(!inst.pattern.includes('$') && !inst.pattern.includes('?')){
+					this.log.warn("This pattern doesn't contain any special characters (#,?,$) -> it's not dynamic. Is that a mistake?",inst,elem);
 				}
 				break;
 			case 'object': //really means it's an array, because getInstructions() has already made sure it's a string|number|array
 				inst.pattern='${'+inst.pattern.join('.')+'}';
 				break;
 			case 'number':
-				this._log.makeError("Repeater key/pattern cannot be numbers:",inst.pattern).throw('TypeError');
+				this.log.makeError("Repeater key/pattern cannot be numbers:",inst.pattern).throw('TypeError');
 				break;
 		}
 
 		//If we only deal in primitive children, then the pattern can't make reference to any props
-		if(this._data._private.options.children=='primitive' && inst.pattern.match(/\$\{([^}]+)\}/))
-			this._log.makeError(`options.children=='primitive' => no complex patterns: '${inst.pattern}'`).throw('EMISMATCH');
+		if(this.data._private.options.children=='primitive' && inst.pattern.match(/\$\{([^}]+)\}/))
+			this.log.makeError(`options.children=='primitive' => no complex patterns: '${inst.pattern}'`).throw('EMISMATCH');
 		 //^the opposite can obviously happen, childen=='complex' but a specific child is primitive...
 
 		
@@ -1184,34 +1254,6 @@ module.exports=function exportRepeater(dep,proto){
 
 
 
-	/*
-	* If multiple templates exist, they have rules when to use them, this method checks those rules
-	*
-	* @param number index 	Index that $node is at or will be at
-	* @param any value 		The 
-	* @param array arr 		Array with 2 or 4 items: [template,criteria] or [template,pattern,operator,criteria]
-	* @param any value 		The value of an item in the _data
-	*
-	* @return bool 			True if the template should be used, else false
-	* @no-throw
-	* @call(this)
-	*/
-	function checkTemplateRule(index,value,rule,nodeToLog){
-
-		try{
-			var pattern=rule[0]
-				,resolved=Repeater.applyPattern.call(this,index,value,pattern,nodeToLog) //can throw, usually if pattern type!=value type
-				,operator=rule[1]
-				,criteria=rule[2]
-			;
-			return bu.compare.call(this,resolved,operator,criteria);
-		}catch(err){
-			this._log.error(err);
-			return false;
-		}
-
-
-	}
 
 
 
@@ -1219,70 +1261,121 @@ module.exports=function exportRepeater(dep,proto){
 	/*
 	* Choose which template to used based on the value of an item
 	*
-	* @param number insertAt		The index the template is going to be inserted at
+	* NOTE: Templates are checked in order, and the first match wins
+	*
+	* @param number index			The index the template is going to be inserted at
 	* @param mixed value 		The value of an item of the underlying smarties.Array
 	*
 	* @throws
 	* @return node 			A cloned template, ready to be modified and inserted
 	* @call(this)
 	*/
-	function chooseAndCloneTemplate(insertAt,value){
+	function chooseAndCloneTemplate(index,value){
+		var clone;
 
 		//First we clone the template... but there may be multiple, in which case we have to figure out which one...
-		if(this._templates.length>1){
+		if(this.templates.childElementCount>1){
 			
-			var dflt,rules=[];
-			for(var i=0;i<this._templates.length; i++){
-				var t=this._templates[i];
-				if(t.hasAttribute('xxx-repeat_usedefault')){
-					dflt=t;
-					continue
-				}
-
-				//Get the rule which we've already made sure is an array like [pattern,operator,criteria]
-				var rule=bu.getJsonAttr(t,'xxx-repeat_useif');
-
-				//store so we can check all rules later if default template is chosen this time
-				rules.push(rule); 
-				
-				//Now check the rule
-				if(checkTemplateRule.call(this,insertAt,value,rule,t)){
-					var clone=t.cloneNode(true);
-					this._log.debug("Rule matched --> cloned template:",rule,clone);
-				
-					//Define func to check if a new value would still choose this template
-					clone._checkRightTemplate=(newValue)=>checkTemplateRule.call(this,clone._repeatIndex,newValue,rule,clone)
-
-					return clone;
+			
+			//FutureDev: Do not try to prevent additional lookups here. Why? Value could be an object and we can't detect
+			//           that a sub-prop has changed. Or a getter may be returning random values... If ANY caching should
+			//           happen do so in xxx.proto
+			var patterns={}; //this is only for logging purposes for the reason stated ^
+			var checkRule=([pattern,operator,criteria],template,index,value)=>{
+				try{
+					var resolved=patterns[pattern]=proto.static.applyPattern.call(this,index,value,pattern,template,'emptyPatternOK');
+					return bu.compare(resolved,operator,criteria);
+				}catch(err){
+					this.log.error("BUGBUG: Error checking template rule. This should have been prevented when parsing templates"
+						,{value:{index,value,pattern,resolved},operator,criteria,template,clone}, err);
+					return false;
 				}
 			}
 
-			if(!dflt)
-				this._log.throw("None of the templates matched this value (and there's no default):",value,rules);	
-			
-			var clone=dflt.cloneNode(true);	
-			this._log.debug("No rule matched, using default:",clone,{value,rules});
-			
-			//Define func to check that a new value would not choose any of the other templates, ie. default is 
-			//still right choice
-			clone._checkRightTemplate=(newValue)=>{
-				let index=clone._repeatIndex;
-				for(var i=0;i<rules.length;i++){
-					if(checkTemplateRule.call(this,index,newValue,rules[i],clone))
-						return false;
+			let rules=[]
+				,ble=this.log.makeEntry('debug',"Choosing which template to use",{templates:this.templates.children,value,index,patterns,rules})
+				,template
+			;
+			block:{
+				let dflt,t=0;
+				for(template of this.templates.children){
+					t++;//for logging 
+
+					if(template.hasAttribute('xxx-repeat_usedefault')){ //we deal with this after all others
+						dflt=template; 
+						continue;
+					}else if(template.hasAttribute('xxx-repeat_showonempty')){ //this never get's inserted when we have a value
+						continue;
+					}
+
+					//Get the rule which we've already made sure is an array like [pattern,operator,criteria]
+					var rule=bu.getJsonAttr(template,'xxx-repeat_useif');
+
+					//store so we can check all rules later if default template is chosen this time
+					rules.push(rule); 
+					
+					//Now check the rule
+					if(checkRule(rule,template,index,value)){
+						ble.addHandling(`Template #${t} - MATCH!`,template);
+						break block;
+
+					}else{
+						ble.addHandling(`Template #${t} - No match.`,template);
+					}
 				}
+
+				if(!dflt){
+					ble.msg="No template rules matched, and there is no default."
+					ble.setCode('ENOMATCH').exec().throw()
+				}
+				
+				ble.addHandling("No rule matched, using default:",dflt);
+				template=dflt;
+				rules.push(false); //easy trick to check all rules vv
+			}
+
+			//Now we have our a template, let's clone it
+			clone=template.cloneNode(true);	
+
+			//When a change happens we need to check if we can use the same rule. REMEMBER: multiple rules can match, but we use
+			//the first matching one, so if #4 matched this time, but on change #2 and #4 match then we have to switch.
+			clone._keepSameTemplate=(event)=>{
+				//Get the current index of the clone, which may have changed from before...
+				var newIndex=clone._repeatIndex; 
+
+				//Start by checking the rule that matched last time, if that one doesn't match then we don't need
+				//to check any more rules (not applicable if dflt was used ^)
+				var last=rules[rules.length-1]; 
+				if(last && !checkRule(last,template,event.key,event.value)){ 
+					this.log.traceCalled("Template no longer matches.",{template,rule:last
+						,oldIndex:index,newIndex:event.key,oldValue:value,newValue:event.value}).storeOnObject(clone,devmode);
+					return false;
+				}
+
+				//Now check the other rules, any of them match and we have to change
+				for(let i=0;i<rules.length-1;i++){ //less than last one, ie. not including last one
+					if(checkRule(rules[i],template,event.key,event.value)){
+						this.log.traceCalled("Another rule matched, changing templates.") //TODO: Find way to use this knowledge so we don't check again
+							.storeOnObject(clone,devmode);
+						return false;
+					}
+				}
+
+				this.log.traceCalled("Keeping same template.",template).storeLastOnObject(clone,devmode);
 				return true;
 			}
-			return clone;
+
+			ble.exec().storeOnObject(clone,devmode);
 
 		}else{
-			var clone=this._templates[0].cloneNode(true);  
-			this._log.debug('Only one template existed, cloned that:',clone);
+			clone=this.templates.firstElementChild.cloneNode(true);  
+			this.log.debug('Only one template existed, cloned that:',clone);
 			
-			clone._checkRightTemplate=function(){return true;} //Only one option, always the right value
+			clone._keepSameTemplate=function(){return true;} //Only one option, always the right value
 			
-			return clone;
 		}
+		
+		return clone;
 	}
 
 
@@ -1296,35 +1389,47 @@ module.exports=function exportRepeater(dep,proto){
 	/*
 	* Propogate a value the DOM
 	*
-	* @param <HTMLElement> clone 		@see getNodeArray(clone)
+	* @param mixed nodeOrNodes 		@see this.getNodesWithInstructions()
 	* @param object event 	
 	* @param boolean onlyIndexPatterns 	If truthy, only run instructions that contain '#'
 	*
 	* @return void
 	* @call(this)
 	*/
-	function propogateToNodes(clone, event,onlyIndexPatterns=false){
+	function propogateToNodes(nodeOrNodes, event,onlyIndexPatterns=false){
 		if(!event || typeof event!='object'||!event.hasOwnProperty('value')){
-			this._log.makeError("Bad data. Could not propogate to repeater item.",{item:clone,data:event}).addFrom().exec();
+			this.log.makeError("Bad event, could not propogate to nodes.",event,nodeOrNodes).setCode('EINVAL').calledFrom().exec();
 			return;
 		}
-		this._log.traceFunc(arguments);
+		this.log.traceFunc(arguments).storeOnObject(nodeOrNodes,devmode);
 
-		//Loop through all child nodes with instructions (defined as those marked with this._private.targetClass)
-		var nodes=this.getNodesWithInstructions(clone), node, inst;
-		for(node of nodes){
-			if(!Array.isArray(node.xxxRepeat)||!node.xxxRepeat.length){
-				this._log.error('BUGBUG No instructions on node:',node);
+		//Loop through all child nodes with instructions (defined as those marked with this.targetClass)
+		for(let node of this.getNodesWithInstructions(nodeOrNodes)){
+			let instructions=node.xxxRepeat, len, i=0;
+			if(!Array.isArray(instructions)||!instructions.length){
+				this.log.error('BUGBUG No instructions on node:',node);
 			}else{
-				//If a pattern exists, apply it
-				//...then loop throught the instructions and apply
-				for(inst of node.xxxRepeat){
-					
-					//If this is an index change, don't run any instructions that aren't index dependent...
-					if(onlyIndexPatterns && !event.pattern.includes('#'))
-						continue;
+				let len=instructions.length,i=0;
+				try{
+					//If a pattern exists, apply it
+					//...then loop throught the instructions and apply
+					for(i;i<len;i++){
+						let inst=instructions[i];
 
-					this.executeAction(node,inst,event);	 //should not throw
+						//If this is an index change, don't run any instructions that aren't index dependent...
+						if(onlyIndexPatterns && !inst.pattern.includes('#'))
+							continue;
+
+						this.executeAction(node,inst,event);	 //only throws 'break' when we should stop processing instructions
+					}
+				}catch(signal){
+					if(signal=='break'){
+						if(len-1-i) // any left...
+							this.log.debug("Received 'break' signal. Skipping remaining instructions for node:"
+								,{ran:instructions.slice(0,i),skipped:instructions.slice(i)},node);
+					}else{
+						this.log.error("BUGBUG Unexpected error.",signal,node);
+					}
 				}
 			}
 			
@@ -1350,112 +1455,3 @@ module.exports=function exportRepeater(dep,proto){
 
 
 
-
-	// /*
-	// * Apply a pattern to a complex or primitie value, getting a string in return
-	// *
-	// * @param string pattern
-	// * @param primitive|mixed value 	If this.options.children=='primitive' => primitive, else this can be anyhing
-	// * @opt <HTMLElement> node 		For logging purposes only!
-	// *
-	// * @throw <ble TypeError> If $pattern isn't string (prepareTemplates() should have ensured we get string 
-	// *							so this doesn't happen)
-	// * @throw <ble Error> 	 If pattern type and value type mismatch
-	// * @return string
-	// */
-	// Repeater.prototype.applyPattern=function(pattern,value,node=undefined){
-	// 	//First handle the 3 most simple cases
-	// 	if(pattern=='#')
-	// 	//Determine which syntax to use...
-	// 	if(determinePatternType(pattern)=='complex'){
-	// 		if(typeof value=='object' || !value){//All complex or falsey values
-	// 			return applyComplexPattern.call(this,pattern,value,node);
-
-	// 		}else{
-	// 			this._log.makeError("Got complex pattern but primitive value:",{pattern,value,node}).throw();
-	// 		}
-
-	// 	}else{//pattern in primitive
-	// 		if(value && typeof value=='object'){
-	// 			//All non-primitives, excluding null
-	// 			this._log.makeError("Got primitive pattern but complex value:",{pattern,value,node}).throw();
-	// 		}else{
-	// 			this._log.trace("Resolving primitive pattern:",{pattern,value,node});
-	// 			if(value==undefined || value==null){
-	// 				return pattern.replace('#','');
-	// 			}else{
-	// 				//All primitive values
-	// 				return pattern.replace('#',value);
-	// 			}
-	// 		}
-
-	// 	}
-
-
-	// }
-
-
-	// /*
-	// * Broken out from applyPattern() to make code less condense. But only call it from there...
-	// *
-	// *	
-	// * @opt <HTMLElement> node 			For logging purposes only!
-	// *
-	// * @return string 
-	// * @call(this) 		for logging
-	// */
-	// function applyComplexPattern(pattern, value, node){
-
-	// 	var resolved=pattern; //init
-		
-	// 	//Find all the matching patterns...
-	// 	var regexp=/\$\{([^}]+)\}/g
-	// 		,matches=bu.regexpAll(regexp,pattern)
-	// 		,logMsg
-	// 		,lvl='trace'
-	// 	;
-
-	// 	if(value){
-	// 		// var self=this;
-	// 		var noMatchedKeys=true;
-	// 		matches.forEach(function resolveEachPatternMatch(arr){
-	// 			//...and swap them for the value of the corresponding key
-	// 			if(value.hasOwnProperty(arr[1])){
-	// 				noMatchedKeys=false
-	// 				resolved=resolved.replace(arr[0],value[arr[1]]);
-	// 			}else{
-	// 				resolved=resolved.replace(arr[0],'');
-	// 			}				
-	// 		})
-	// 		logMsg="Resolved complex pattern.";
-	// 		if(noMatchedKeys){
-	// 			lvl='warn';
-	// 			logMsg+=' No keys matched!'
-	// 		}
-
-	// 	}else{
-	// 		matches.forEach(function removeEachPatternMatch(arr){
-	// 			resolved=resolved.replace(arr[0],'');
-	// 		})
-	// 		logMsg="Empty value passed in, removed all matches from pattern.";
-	// 		lvl='info'
-	// 	}
-		
-	// 	//Make sure "true"=>true etc.
-	// 	resolved=bu.stringToPrimitive(resolved);
-
-	// 	if(!resolved){
-	// 		logMsg+=' Resulting string is empty!'
-	// 		lvl=(lvl=='warn'?lvl:'note');
-	// 	}
-
-	// 	//If we're testing templates to see which one to use, always log debug since most
-	// 	//of them are expected to produce empty strings
-	// 	if(node && !document.contains(node)){
-	// 		lvl='debug'
-	// 	}
-
-	// 	this._log[lvl](logMsg, node,{'object':value,pattern,regexp,matches,resolved});
-	
-	// 	return resolved;
-	// }
