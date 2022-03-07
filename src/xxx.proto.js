@@ -147,7 +147,6 @@ module.exports=function exportXXX(dep){
 
 		//Inherit from dep.BetterEvents and set failed emits to log to our log
 		dep.BetterEvents.call(this);
-		Object.defineProperty(this._betterEvents,'onerror',{value:this.log.error});
 
 		//Warn if data is passed (legacy)
 		if(arguments[4])
@@ -624,7 +623,7 @@ module.exports=function exportXXX(dep){
 			}else{
 				//No target => use the templates parent
 				this._private.options.target=templates.parentNode; 
-				this.log.debug("Set templates parentNode as target for this repeater:",templates.parentNode);
+				this.log.debug("Set templates parentNode as target for this "+this.constructor.name+":",templates.parentNode);
 				unsetTargetOnFail=true;
 				 //^remember, if the template has been cloned it won't have a parentNode which means prepareTarget() will 
 				 // fail unless we set a target before then
@@ -636,7 +635,7 @@ module.exports=function exportXXX(dep){
 			Object.defineProperty(this,'templates',{enumerable:true,configurable:true,value:templates.content}); 
 
 			
-			//If we have multiple templates, we have to make sure they have ${'xxx-repeat'}-if attributes, since we'll 
+			//If we have multiple templates, we have to make sure they have useif attributes, since we'll 
 			//only be inserting a single template for each item in the underlying smarties.Array. So any that are missing 
 			//this attr, delete
 			if(this.templates.childElementCount>1){
@@ -692,8 +691,8 @@ module.exports=function exportXXX(dep){
 		for(let i=this.templates.childElementCount-1;i>-1;i--){
 			let temp=this.templates.children[i];
 
-			if(!temp.hasAttribute('xxx-repeat_usedefault')&&!temp.hasAttribute('xxx-repeat_showonempty')){
-				let attr='xxx-repeat_useif'
+			if(!temp.hasAttribute(this.targetClass+'_usedefault')&&!temp.hasAttribute(this.targetClass+'_showonempty')){
+				let attr=this.targetClass+'_useif'
 				if(!temp.hasAttribute(attr)){
 					this.log.warn(`Removing one of multiple templates because it's missing useif/usedefault attributes:`,temp); 
 					this.templates.removeChild(temp);
@@ -1267,20 +1266,20 @@ module.exports=function exportXXX(dep){
 
 		register('hide',setDisplay.bind(this,false));
 		register('show',setDisplay.bind(this,true));
-		register('onprimitive',(x)=>{setDisplay.call(this,false,isComplex.call(this,x))});
-		register('oncomplex',(x)=>{setDisplay.call(this,true,isComplex.call(this,x))});
-		register('has',(x)=>{setDisplay.call(this,true,hasComplexProp.call(this,x))});
-		register('hasnot',(x)=>{setDisplay.call(this,false,hasComplexProp.call(this,x))});
+		register('onprimitive',(x)=>{setDisplay.call(this,false,isComplex.call(this,x))}); //show element if value is a primitive
+		register('oncomplex',(x)=>{setDisplay.call(this,true,isComplex.call(this,x))});    //show element if value is complex
+		register('has',(x)=>{setDisplay.call(this,true,hasComplexProp.call(this,x))});     //show element if value is complex and has prop
+		register('hasnot',(x)=>{setDisplay.call(this,false,hasComplexProp.call(this,x))}); //show element if value primitive or lacks prop
 		register('id',setId.bind(this));
 		register('class',followClass.bind(this)); //sets class to value on underlying
 		register('classif',toggleClass.bind(this)); //sets value to specific arg
-		register('prop',followProp.bind(this)); 
+		register('prop',followProp.bind(this)); //set prop on HTMLElement object (ie. not visible in html and not included on clone)
 		register('propif',toggleProp.bind(this)); 
 		register('attr',setAttribute.bind(this));
 		register('value',(x)=>{bu.setValueOnElem(x.node,x.value)});   //set value or checked attribute of node (or html if not input)
-		register('html',(x)=>{x.node.innerHTML=x.value});				//set innerHTML without checking anything
-		register('text',setText.bind(this)); 							//set text at begining of node without affecting child nodes
-		register('showtext',(x)=>{ 
+		register('html',(x)=>{x.node.innerHTML=x.value});		//set innerHTML without checking anything
+		register('text',setText.bind(this)); 					//set text at begining of node without affecting child nodes
+		register('showtext',(x)=>{                              //same as ^ but hide entire element on empty text
 			setText(x);
 			setDisplay.call(this,true,x);
 		});
@@ -1348,7 +1347,7 @@ module.exports=function exportXXX(dep){
 
 
 	/*
-	* Check if a the indicated key is a complex value that has a given prop with informational value, then
+	* Check if the indicated key is a complex value that has a given prop with informational value, then
 	* set the .test prop on the passed in object
 	*
 	* @param object x 		
@@ -1639,7 +1638,9 @@ module.exports=function exportXXX(dep){
 
 
 	/*
-	* Used by Binder and Repeater to create a new (empty) data smarty
+	* Used by Binder and Repeater to create a new (empty) data smarty. 
+	*
+	* NOTE: Binders will create objects while repeaters will create arrays
 	*
 	* @return this
 	*/
@@ -1895,71 +1896,7 @@ module.exports=function exportXXX(dep){
 		return targetClass;
 	}
 
-	// /*
-	// * Check that a targetClass is not already in use, then register it on the appropriate
-	// * constructor's _instances Map
-	// *
-	// * @param string cName 			Name of xxx constructor. NOTE: This must be passed despite calling as the instance since
-	// *								the xxx class may have been extendend or similar...
-	// * @param string targetClass     
-	// *
-	// * @throws EEXIST
-	// * @throws EINVAL
-	// *
-	// * @return void
-	// * @call(xxx instance)
-	// */
-	// function addInstance(cName, targetClass){
-	// 	Object.defineProperty(this,'isXXX',{value:cName});
-
-	// 	const log=getLog(this);
-	// 	try{
-	// 		bu.checkType('string',targetClass);
-	// 		if(targetClass=='undefined')
-	// 			log.throwCode('EINVAL',"The string 'undefined' is not suitable as targetClass");
-	// 	}catch(err){
-	// 		log.throw(`Bad targetClass (arg#1), cannot setup xxx.${cName}.`,err)
-	// 	}
-	// 	//Check with all xxx types if an instance has already been registered with this class
-	// 	let exist=getInstance(targetClass)
-	// 	if(exist)
-	// 		log.throwCode('EEXIST',`A xxx.${exist.isXXX} with class ${targetClass} already exists.`,exist);
-		
-
-	// 	//If still running, register it
-	// 	_export[cName]._instances.set(targetClass,this);
-	// }
-
-
-	// /*
-	// * Common setup... see func body
-	// * @call(xxx instance)
-	// */
-	// function setupPrivateLogEvents(targetClass,options){
-	// 	//Store options and targetClass on _private
-	// 	bu.checkType('object',options); //throw on fail
-	// 	Object.defineProperty(this,'_private',{enumerable:false,value:{targetClass}});
-	// 	this._private.options=Object.assign({},this.constructor._defaultOptions,options);
-
-
-	// 	//Setup log, using targetClass as print name as well
-	// 	Object.defineProperty(this,'_log',{enumerable:false,value:new dep.BetterLog(this,
-	// 		Object.assign({'name':targetClass},options))});
-
-	// 	//For easy debugging, any log entry containing a node get's stored on that node
-	// 	if(devmode){
-	// 		this.log.listen(entry=>entry.extra.find(x=>bu.varType(x)=='node'&&entry.storeOnObject(x)));
-	// 	}
-		
-
-	// 	//Inherit from dep.BetterEvents and set failed emits to log to our log
-	// 	dep.BetterEvents.call(this);
-	// 	Object.defineProperty(this._betterEvents,'onerror',{value:this.log.error});
-	// }
-
-
-
-
+	
 
 
 
